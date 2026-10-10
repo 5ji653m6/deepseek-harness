@@ -2012,7 +2012,7 @@ describe('JsonlSessionPersistence: scanLog unit', () => {
     expect(restored).toMatchObject({ type: 'user/message', surfaceOp: 'append', sourceEventSeqs: [0, 1] })
   })
 
-  it('requires the tagged inherited cut to agree with the v3 header lineage', () => {
+  it('requires the tagged inherited cut to agree with the v4 header lineage', () => {
     const seeded = { ...meta('scanner-seeded-cut'), isSeeded: true }
     const seededHeader = JSON.stringify(toHeaderLine(seeded, SessionLogOffset(0)))
     expect(() => scanLog(Buffer.from(`${seededHeader}\n`)))

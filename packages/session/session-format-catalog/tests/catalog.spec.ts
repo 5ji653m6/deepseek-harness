@@ -27,7 +27,7 @@ describe('first-party Session format catalog', () => {
     }
     expect(() => { validateInstalledCurrentSessionArtifact(artifact) }).toThrow(/image index 0 does not exist/)
   })
-  it('statically owns the complete adjacent v0 to v3 chain', () => {
+  it('statically owns the complete adjacent v0 to v4 chain', () => {
     const header = {
       type: 'session',
       version: 0,
@@ -63,7 +63,7 @@ describe('first-party Session format catalog', () => {
 
   it('restores the installed current vocabulary without freezing ordinary payload additions', () => {
     const header = {
-      type: 'session', version: 3, id: 'current-growth', createdAt: 1, isSeeded: false, delegationDepth: 0,
+      type: 'session', version: 4, id: 'current-growth', createdAt: 1, isSeeded: false, delegationDepth: 0,
     }
     const restore = (rows: readonly unknown[]) => {
       const current = sessionFormatCatalog.createRestore(header, {

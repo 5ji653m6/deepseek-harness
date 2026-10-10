@@ -287,7 +287,7 @@ async function decodeZstdJsonl(path: string): Promise<string> {
 }
 
 describe('JSONL immutable generation publication', () => {
-  it('refuses V2 messages without surface markers before writing a V3 successor', async () => {
+  it('refuses V2 messages without surface markers before writing a V4 successor', async () => {
     const root = await tempRoot()
     const request = options(root, 'none', catalogAdapter(), 2)
     const events = assistantLifecycle('assistant/message', assistantData())
@@ -332,7 +332,7 @@ describe('JSONL immutable generation publication', () => {
     expect(await readdir(root)).toEqual(['session.v2.jsonl'])
   })
 
-  it('publishes canonical V3 replacements and headers while retaining exact V2 bytes', async () => {
+  it('publishes canonical V4 replacements and headers while retaining exact V2 bytes', async () => {
     const root = await tempRoot()
     const request = options(root, 'none', catalogAdapter(), 2)
     const config = { provider: 'mock', model: 'mock' }
