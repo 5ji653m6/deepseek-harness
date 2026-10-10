@@ -130,6 +130,9 @@ function validateSessionHeader(id: SessionId, input: unknown): SessionHeader {
   if (record.agentPreset !== undefined && typeof record.agentPreset !== 'string') {
     throw new Error('session header agentPreset must be a string')
   }
+  if (record.owner !== undefined && typeof record.owner !== 'string') {
+    throw new Error('session header owner must be a string')
+  }
   return deepFreeze(record as unknown as SessionHeader)
 }
 
@@ -1039,6 +1042,7 @@ export class SessionStore extends Service {
       ...meta?.origin === undefined ? {} : { origin: meta.origin },
       ...meta?.delegationDepth === undefined ? {} : { delegationDepth: meta.delegationDepth },
       ...meta?.agentPreset === undefined ? {} : { agentPreset: meta.agentPreset },
+      ...meta?.owner === undefined ? {} : { owner: meta.owner },
     }
     return Session.create(sessionId, seed, header, options?.inheritedEventCount, this.projections)
   }
@@ -1246,6 +1250,10 @@ export class SessionStore extends Service {
         ...liveSource.header.cwd !== undefined ? { cwd: liveSource.header.cwd } : {},
         parentSession: liveSource.id,
         isSeeded: true,
+        // A forked child belongs to the same subject as its source: corpus
+        // filtering and resume/fork/export checks inherit ownership through
+        // the lineage.
+        ...liveSource.header.owner !== undefined ? { owner: liveSource.header.owner } : {},
       },
     })
   }

@@ -61,6 +61,8 @@ export function materializeSessionResultFilters(
         assertAllowedValues(filter.kind, values, ['live', 'persisted'])
         return { kind: filter.kind, values }
       }
+      case 'owner':
+        return { kind: filter.kind, values: copyNullableStrings(filter.kind, filter.values) }
       default:
         return unknownFilter(filter)
     }
@@ -129,6 +131,8 @@ function sessionPredicate(filter: SessionResultFilter): (record: SessionRecord) 
     }
     case 'parent':
       return record => filter.values.includes(record.header.parentSession ?? null)
+    case 'owner':
+      return record => filter.values.includes(record.header.owner ?? null)
     case 'availability':
       assertAllowedValues(filter.kind, filter.values, ['live', 'persisted'])
       return record => filter.values.some(value => value === 'live' ? record.live : record.persisted)

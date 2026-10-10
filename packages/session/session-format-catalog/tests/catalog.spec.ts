@@ -37,13 +37,13 @@ describe('first-party Session format catalog', () => {
       delegationDepth: 0,
     }
 
-    expect(sessionFormatCatalog.currentVersion).toBe(3)
+    expect(sessionFormatCatalog.currentVersion).toBe(4)
     expect(sessionFormatCatalog.readHeader(header)).toEqual({
       status: 'migration-required',
       storedVersion: 0,
-      targetVersion: 3,
+      targetVersion: 4,
       header: {
-        version: 3,
+        version: 4,
         id: 'catalog',
         createdAt: 1,
         isSeeded: true,
@@ -57,7 +57,7 @@ describe('first-party Session format catalog', () => {
     })
     restore.decodeRow({ type: 'turn/start', seq: 0, time: 2, data: { turn: 1 } })
     expect(restore.finish()).toMatchObject({
-      header: { version: 3, id: 'catalog' },
+      header: { version: 4, id: 'catalog' },
     })
   })
 
@@ -102,7 +102,7 @@ describe('first-party Session format catalog', () => {
         restore.decodeRow({ type: 'feedback/record', seq: 0, time: 1, data: { text: 'inherited' } })
       }
       const artifact = restore.finish()
-      expect(artifact.header.version).toBe(3)
+      expect(artifact.header.version).toBe(4)
       expect(artifact.inheritedEventCount).toBe(seedLength)
       expect(artifact.events.at(-1)).toEqual({
         type: 'session/end-seed', seq: seedLength, time: 1, data: { inherited: true },
@@ -123,7 +123,7 @@ describe('first-party Session format catalog', () => {
     const restore = sessionFormatCatalog.createRestore(header, { recovery: 'strict', validation: 'current' })
     for (const row of rows) restore.decodeRow(row)
     expect(restore.finish()).toEqual({
-      header: { version: 3, id: 'v2-identity', createdAt: 1, isSeeded, delegationDepth: 0 },
+      header: { version: 4, id: 'v2-identity', createdAt: 1, isSeeded, delegationDepth: 0 },
       inheritedEventCount: isSeeded ? 4 : 0,
       events: [
         { type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } },
@@ -200,7 +200,7 @@ describe('first-party Session format catalog', () => {
       { ...rows[8], seq: 9 }, { ...rows[9], seq: 10 },
     ]
     expect(artifact).toEqual({
-      header: { version: 3, id: sourceHeader.id, createdAt: 1, isSeeded: false, delegationDepth: 0 },
+      header: { version: 4, id: sourceHeader.id, createdAt: 1, isSeeded: false, delegationDepth: 0 },
       inheritedEventCount: 0, events: expected,
     })
     const currentHeader = deepFreeze(sessionFormatCatalog.encodeCurrentHeader(artifact.header, artifact.inheritedEventCount))

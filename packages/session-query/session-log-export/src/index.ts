@@ -17,6 +17,7 @@ import {
   type SessionLogCompressionLevel,
   type SessionLogExportReady,
 } from './archive.ts'
+import { currentCallerDispatch } from './caller-subject.ts'
 
 export {
   DEFAULT_SESSION_LOG_COMPRESSION_LEVEL,
@@ -105,6 +106,18 @@ function connectionOf(ctx: Context): SessionLogConnection {
   return Reflect.get(ctx, 'connection') as SessionLogConnection
 }
 
+/**
+ * Duck-typed SessionQuery not-found discrimination: `SessionQueryError` is a
+ * dev-only surface in this package, and its stable `code` discriminates
+ * without a runtime class import.
+ * @param error - rejection observed while observing the exported Session.
+ * @returns whether the Session has no durable observation.
+ */
+function isSessionQueryNotFound(error: unknown): boolean {
+  return typeof error === 'object' && error !== null
+    && (error as { code?: unknown }).code === 'SESSION_QUERY_SESSION_NOT_FOUND'
+}
+
 async function sessionLogExportResponse(
   ctx: Context,
   request: Request,
@@ -137,13 +150,38 @@ async function sessionLogExportResponse(
   let rootContent: string | undefined
   try {
     await flushLiveSessionLog(deps, sessionId, request.signal)
+  } catch {
+    request.signal.throwIfAborted()
+    // Flush failure: answer 500 without echoing the error, which may carry
+    // absolute host paths into the browser error bar.
+    return new Response('session log export failed to read the stored log', { status: 500 })
+  }
+  // Per-user export rule: a browser dispatch exports only Sessions it owns,
+  // with the same not-found silence as every other Session surface. The
+  // durable header observed after the flush barrier is the authority.
+  try {
+    using observation = await deps.sessionQuery.observeSession(sessionId, {
+      projectionMode: 'none',
+      signal: request.signal,
+    })
+    const dispatch = currentCallerDispatch()
+    if (dispatch !== undefined && (observation.header.owner ?? undefined) !== dispatch.subject) {
+      return new Response('session not found', { status: 404 })
+    }
+  } catch (error: unknown) {
+    request.signal.throwIfAborted()
+    if (isSessionQueryNotFound(error)) {
+      return new Response('session not found', { status: 404 })
+    }
+    return new Response('session log export failed to read the stored log', { status: 500 })
+  }
+  try {
     rootContent = await readSessionLogText(deps.sessionPersistence, sessionId, request.signal)
     request.signal.throwIfAborted()
   } catch {
     request.signal.throwIfAborted()
-    // Root preparation failure (flush, open, or read): answer 500 without
-    // echoing the error, which may carry absolute host paths into the
-    // browser error bar.
+    // Root read failure: answer 500 without echoing the error, which may
+    // carry absolute host paths into the browser error bar.
     return new Response('session log export failed to read the stored log', { status: 500 })
   }
   if (rootContent === undefined) {

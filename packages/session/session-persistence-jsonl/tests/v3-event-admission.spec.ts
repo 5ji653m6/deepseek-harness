@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { generationLogPath, scanLog } from '../src/format.ts'
 
 const id = SessionId('v3-admission')
-const header = { type: 'session', version: 3, id, createdAt: 1000, isSeeded: false, delegationDepth: 0 }
+const header = { type: 'session', version: 4, id, createdAt: 1000, isSeeded: false, delegationDepth: 0 }
 const start = { type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } }
 const prefix = [header, start].map(row => JSON.stringify(row)).join('\n') + '\n'
 const obsoleteTypes = ['tool/code-dispatch-start', 'tool/code-dispatch'] as const
@@ -41,7 +41,7 @@ describe('native V3 event admission at EOF', () => {
   })
 
   async function store(bytes: Buffer): Promise<string> {
-    const path = generationLogPath(root, undefined, id, 3, 'none')
+    const path = generationLogPath(root, undefined, id, 4, 'none')
     await mkdir(dirname(path), { recursive: true })
     await writeFile(path, bytes)
     return path

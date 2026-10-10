@@ -58,6 +58,7 @@ Add one entry per server; nothing else is required. After the harness starts, th
 | `serverName` | required | Namespace for the server's tool names; `[A-Za-z0-9_-]{1,32}`, unique inside one registration scope |
 | `command` / `args` / `env` / `cwd` | — | stdio: executable, arguments, extra env merged over scrubbed ambient env, working directory |
 | `url` / `headers` | — | streamable-http: endpoint URL and extra request headers |
+| `resolveRequestHeaders` | — | streamable-http: optional per-request header resolver `(subject) => headers`, consulted when each request is issued with the caller subject active at that moment; wired automatically from the HRMS header source in per-user deployments |
 | `toolCallTimeoutMs` | `60,000` | Timeout per `tools/call` or resource request |
 | `maxInstructionBytes` | `32,768` | Maximum UTF-8 bytes of server instructions including attribution; an oversized value rejects the connection |
 | `failOnStartupError` | `false` | Reject plugin activation when the initial connection or tool synchronization fails |
@@ -67,6 +68,8 @@ Add one entry per server; nothing else is required. After the harness starts, th
 | `reconnect.maxAttempts` | `10` | Consecutive failed attempts per outage before giving up |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-mcp-client) is the exhaustive source for every accepted field.
+
+In per-user HRMS deployments (`dsh-client-connection` serving per-user logins), the streamable-http transport resolves request headers per request instead of freezing them at connection establishment: `X-HRMS-User` carries the owning Session's verified subject and `X-HRMS-User-Token` its server-held token pair, so the deployed sidecar verifies credentials presented per user. Session-controller admits each prompt under its Session owner's subject, so concurrent owners sharing one app-level connection each present only their own `X-HRMS-*` headers on every tool call, and a request issued outside any owner dispatch (startup, timer-driven reconnect work) presents no HRMS headers; single-operator deployments without the HRMS header source keep the static `headers` behavior byte-identical. The header source is consulted when each request is issued — never at plugin apply — so cordis activation order between the MCP client and client-connection cannot skip the wiring, and a source that exists but does not expose `resolveFor` fails the request with an explicit error instead of silently presenting the static headers.
 
 After startup, the server's tools appear as `mcp__<serverName>__<tool>` — try a prompt that uses one. If the initial connection fails, the harness still starts but no tools from that server appear, and an error is logged. Setting `failOnStartupError: true` rejects plugin activation; [app-boot's startup policy](../../boot/app-boot/README.md) still permits an optional MCP entry to fail without aborting the harness.
 

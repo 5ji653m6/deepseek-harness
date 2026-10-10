@@ -34,6 +34,8 @@ import type {
   SessionWireEvent,
 } from './types.ts'
 import { SessionAssistantStreamAccumulator } from './assistant-stream.ts'
+import { ApiSessionNotFound } from './agent.ts'
+import { assertSessionAddressable } from './ownership.ts'
 
 const DEFAULT_MAX_MESSAGES = 50
 const MESSAGE_TYPES = new Set(['user/message', 'assistant/message'])
@@ -254,6 +256,14 @@ export class SessionHistoryController {
         observation[Symbol.dispose]()
         rejectNotFound(address)
       }
+      // Per-user read rule: page and follow are content reads, so a browser
+      // dispatch addresses only Sessions it owns (same not-found silence).
+      try {
+        assertSessionAddressable(observation.header)
+      } catch (error: unknown) {
+        observation[Symbol.dispose]()
+        throw error
+      }
       try {
         validateAddress(
           address,
@@ -269,6 +279,7 @@ export class SessionHistoryController {
     } catch (error: unknown) {
       if (error instanceof SessionQueryError
         && error.code === 'SESSION_QUERY_SESSION_NOT_FOUND') rejectNotFound(address)
+      if (error instanceof ApiSessionNotFound) rejectNotFound(address)
       throw error
     }
   }

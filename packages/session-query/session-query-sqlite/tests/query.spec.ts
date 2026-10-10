@@ -143,6 +143,16 @@ describe('SQLite search predicate compilation', () => {
       params: [SessionId('p')],
       predicateCount: 1,
     })
+    expect(buildSessionWhere([{ kind: 'owner', values: [] }])).toEqual({
+      sql: '0',
+      params: [],
+      predicateCount: 1,
+    })
+    expect(buildSessionWhere([{ kind: 'owner', values: ['alice', null] }])).toEqual({
+      sql: '(owner IN (?) OR owner IS NULL)',
+      params: ['alice'],
+      predicateCount: 1,
+    })
     expect(buildSessionWhere([
       { kind: 'created-at', from: 1, to: 2 },
       { kind: 'availability', values: [] },

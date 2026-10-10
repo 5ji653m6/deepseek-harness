@@ -195,7 +195,7 @@ describe('session-query document and filter helpers', () => {
   it('applies every session clause with OR values and validates closed values', () => {
     const parent = SessionId('parent')
     const records = [
-      { header: header('a', { cwd: '/a', parentSession: parent }), live: true, persisted: false, marker: 1 },
+      { header: header('a', { cwd: '/a', parentSession: parent, owner: 'alice' }), live: true, persisted: false, marker: 1 },
       { header: header('b', { createdAt: 20 }), live: false, persisted: true, marker: 2 },
     ]
     expect(filterSessionResults(records, [
@@ -203,10 +203,13 @@ describe('session-query document and filter helpers', () => {
       { kind: 'cwd', values: ['/a', null] },
       { kind: 'created-at', from: 5, to: 15 },
       { kind: 'parent', values: [parent, null] },
+      { kind: 'owner', values: ['alice', 'bob'] },
       { kind: 'availability', values: ['live'] },
     ])).toEqual([records[0]])
     expect(filterSessionResults(records, [{ kind: 'cwd', values: [null] }])).toEqual([records[1]])
     expect(filterSessionResults(records, [{ kind: 'parent', values: [null] }])).toEqual([records[1]])
+    expect(filterSessionResults(records, [{ kind: 'owner', values: [null] }])).toEqual([records[1]])
+    expect(filterSessionResults(records, [{ kind: 'owner', values: ['alice'] }])).toEqual([records[0]])
     expect(filterSessionResults(records, [{ kind: 'availability', values: ['persisted'] }])).toEqual([records[1]])
     expect(() => filterSessionResults(records, [{ kind: 'availability', values: ['remote' as never] }]))
       .toThrow(expectCode('SESSION_QUERY_INVALID_FILTER'))
@@ -260,6 +263,8 @@ describe('session-query document and filter helpers', () => {
   it('owns filters and rejects malformed runtime filter shapes deterministically', () => {
     expect(materializeSessionResultFilters([{ kind: 'created-at', to: 2 }]))
       .toEqual([{ kind: 'created-at', to: 2 }])
+    expect(materializeSessionResultFilters([{ kind: 'owner', values: ['alice', null] }]))
+      .toEqual([{ kind: 'owner', values: ['alice', null] }])
     expect(() => materializeSessionResultFilters('not-an-array' as never))
       .toThrow(expectCode('SESSION_QUERY_INVALID_FILTER'))
     expect(() => materializeSessionResultFilters([{ kind: 'id', values: 'bad' } as never]))
@@ -269,6 +274,8 @@ describe('session-query document and filter helpers', () => {
     expect(() => materializeSessionResultFilters([{ kind: 'cwd', values: 'bad' } as never]))
       .toThrow(expectCode('SESSION_QUERY_INVALID_FILTER'))
     expect(() => materializeSessionResultFilters([{ kind: 'parent', values: [1] } as never]))
+      .toThrow(expectCode('SESSION_QUERY_INVALID_FILTER'))
+    expect(() => materializeSessionResultFilters([{ kind: 'owner', values: [1] } as never]))
       .toThrow(expectCode('SESSION_QUERY_INVALID_FILTER'))
     expect(() => materializeSessionResultFilters([{} as never]))
       .toThrow(expectCode('SESSION_QUERY_INVALID_FILTER'))

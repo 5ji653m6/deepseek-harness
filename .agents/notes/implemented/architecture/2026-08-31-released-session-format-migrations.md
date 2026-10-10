@@ -202,3 +202,13 @@ Lower generations remain for operator inspection. Retention does not promise dow
 - **Share stateful codec instances globally** — would mix pending attempts, mappings, and counters across concurrent Session restores.
 - **Persist every intermediate format version** — creates durable states with no runtime consumer; only the exact source and final current generation are needed.
 - **Let mounted plugins register migrations** — makes historical readability deployment dependent. The static catalog must restore released formats before feature plugins mount.
+
+## V3 to V4: header-only adjacent migration (2026-09-21)
+
+The v3-to-v4 edge demonstrates the adjacent-migration rule for a metadata-only addition. The optional per-user `owner` arrives as the sole structural change of Session format V4, stamped for Sessions created behind a per-user web login.
+
+- The logical header restamps `version: 3` to `version: 4` and adds optional `owner`. All other fields are unchanged.
+- The stage passes every event row and the inherited cut through unchanged. Seeded-cut derivation reuses the v2-to-v3 marker semantics; an unseeded log with a marker or a seeded log without one is refused.
+- The codec delegates framing to the frozen v3 codec. The restorer strips the owner and restamps the version before delegating to the frozen v3 relationship validator.
+- `SESSION_FORMAT_VERSION` increases to 4. Committed v3 generations are never rewritten. Existing v3 records remain valid; the catalog restores them to v4 with no owner.
+- The [v3-to-v4 package](../../../../packages/session/session-format-v3-to-v4/README.md) is the single specification for this edge. The [2026-09-15 per-user web GUI persistence record](../../../../docs/persistence-changes/2026-09-15-per-user-web-gui.md) documents the compatibility explanation.

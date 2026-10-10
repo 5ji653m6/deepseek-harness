@@ -85,7 +85,7 @@ export type OptionalSessionSeq = SessionSeq | null
  * immutable prior-generation, and current fast-path rules are recorded in
  * `.agents/notes/implemented/architecture/2026-08-31-released-session-format-migrations.md`.
  */
-export const SESSION_FORMAT_VERSION = 3
+export const SESSION_FORMAT_VERSION = 4
 
 /**
  * Immutable validated storage metadata, kept outside the conversation event log.
@@ -127,6 +127,13 @@ export interface SessionHeader {
    * would replay history the model can no longer act on.
    */
   readonly agentPreset?: string
+  /**
+   * Authenticated subject (verified email) that owns this session, when the
+   * session was created behind a per-user web login. Absent on the
+   * process-token path: ownerless sessions belong to the deployment itself.
+   * Corpus listing filters on this field; resume, fork, and export check it.
+   */
+  readonly owner?: string
 }
 
 /**
@@ -155,6 +162,11 @@ export interface CreateSessionOptions {
     readonly origin?: 'subagent'
     readonly delegationDepth?: number
     readonly agentPreset?: string
+    /**
+     * Authenticated subject to stamp into the header's {@link SessionHeader.owner}.
+     * Omit on the process-token path so the header stays ownerless.
+     */
+    readonly owner?: string
   }
 }
 

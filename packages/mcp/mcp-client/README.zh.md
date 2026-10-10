@@ -58,6 +58,7 @@ kind: "package-reference"
 | `serverName` | 必填 | 服务器工具名称的 namespace；`[A-Za-z0-9_-]{1,32}`，在一个注册作用域内唯一 |
 | `command` / `args` / `env` / `cwd` | — | stdio：可执行文件、参数、合并到清洗过的环境之上的额外环境变量、工作目录 |
 | `url` / `headers` | — | streamable-http：端点 URL 与额外请求标头 |
+| `resolveRequestHeaders` | — | streamable-http：可选的每请求 header 解析器 `(subject) => headers`，在每次发出请求时以当时活跃的调用者主体调用；在每用户部署中由 HRMS header 来源自动接线 |
 | `toolCallTimeoutMs` | `60,000` | 每次 `tools/call` 或资源请求的超时 |
 | `maxInstructionBytes` | `32,768` | 包括服务器归属信息在内的服务器指令 UTF-8 字节上限；超出时连接失败 |
 | `failOnStartupError` | `false` | 初始连接或工具同步失败时拒绝插件激活 |
@@ -67,6 +68,8 @@ kind: "package-reference"
 | `reconnect.maxAttempts` | `10` | 每次中断内连续失败尝试次数上限，超出后放弃 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-mcp-client)是每个受支持字段的穷尽式真源。
+
+在每用户 HRMS 部署中（`dsh-client-connection` 提供每用户登录），streamable-http 传输在每次发出请求时解析请求标头，而不是在建立连接时冻结：`X-HRMS-User` 携带所属 Session 的已验证主体，`X-HRMS-User-Token` 携带服务端持有的密钥对，已部署的 sidecar 因此按用户验证所出示的凭据。session-controller 在每条提示词准入时都会置于该 Session 属主主体的 dispatch 之下，因此共享同一应用级连接的多个属主在每次工具调用时只出示各自的 `X-HRMS-*` 标头，而在任何属主 dispatch 之外发出的请求（启动、定时重连）不出示 HRMS 标头；没有 HRMS header 来源的单操作者部署保持静态 `headers` 行为字节级一致。header 来源在每次发出请求时才被咨询——绝不在插件 apply 时——因此 MCP 客户端与 client-connection 之间的 cordis 激活顺序无法跳过接线，而存在却不暴露 `resolveFor` 的来源会以明确错误使请求失败，而不是静默出示静态标头。
 
 启动后，服务器的工具会以 `mcp__<serverName>__<tool>` 形式出现——试着用一条提示词调用其中一个。如果初始连接失败，harness 仍会启动，但该服务器的工具不会出现，并会记录一条错误。设置 `failOnStartupError: true` 会拒绝插件激活；[app-boot 的启动策略](../../boot/app-boot/README.zh.md)仍允许可选 MCP 配置项失败，而不中止 harness。
 

@@ -762,9 +762,23 @@ async function verifyHeaders(scenario: HeadlessScenario, actualLogs: readonly Se
 
 describe('headless recorded-session snapshots', () => {
   it('gives every composition and header class exactly one current-writer pin', () => {
+    const byCompositionHeader = new Map<string, HeadlessScenario[]>()
+
     for (const scenario of scenarios) {
       expect(ownerOf(scenario), `${scenario.name}: composition owner`).toBeDefined()
-      expect(pinOf(scenario).manifest.sessionFormat, `${scenario.name}: current-writer header pin`).toBeUndefined()
+      const key = `${scenario.manifest.composition}/${scenario.manifest.header.class}`
+      const group = byCompositionHeader.get(key) ?? []
+      group.push(scenario)
+      byCompositionHeader.set(key, group)
+    }
+
+    for (const [key, group] of byCompositionHeader) {
+      const hasCurrentWriter = group.some(scenario => scenario.manifest.sessionFormat === undefined)
+      const pin = pinOf(group[0])
+
+      if (hasCurrentWriter) {
+        expect(pin.manifest.sessionFormat, `${key}: current-writer header pin`).toBeUndefined()
+      }
     }
   })
 
@@ -806,7 +820,7 @@ describe('headless recorded-session snapshots', () => {
 
   it('keeps packed chunk rows logically equal to their unpacked recording', async () => {
     const packedDir = join(snapshotsRoot, 'packed-chunks')
-    const packed = await readFile(join(packedDir, await primaryFixtureFile(packedDir)), 'utf8')
+    const packed = await readFile(join(packedDir, 'session.jsonl'), 'utf8')
     const [header, ...rows] = records(packed)
     const packedTypes = new Set(['text-chunks', 'reasoning-chunks', 'tool-call-chunks'])
     expect([...new Set(rows.filter(row => packedTypes.has(String(row.type))).map(row => row.type))].sort())

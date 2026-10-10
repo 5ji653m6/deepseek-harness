@@ -67,13 +67,14 @@ export interface CreateAgentOptions {
   /**
    * Session creation metadata: validated absolute `cwd`, `parentSession`
    * fork lineage, the `isSeeded` fork marker, the coarse `origin`
-   * classification, and the `delegationDepth` recursion budget. Mirrors the
-   * `cwd`/`parentSession`/`isSeeded`/`origin`/`delegationDepth` fields of
-   * {@link CreateSessionOptions.meta} in dsh-session (the internal-only
-   * `createdAt`, used when reconstructing a persisted session, is deliberately
-   * excluded — a factory caller never sets it). This is durable session data,
-   * so the session boundary validates and snapshots it before asynchronous
-   * setup begins.
+   * classification, the `delegationDepth` recursion budget, the durable
+   * `agentPreset` composition id, and the authenticated-subject `owner`.
+   * Mirrors the `cwd`/`parentSession`/`isSeeded`/`origin`/`delegationDepth`
+   * fields of {@link CreateSessionOptions.meta} in dsh-session (the
+   * internal-only `createdAt`, used when reconstructing a persisted session,
+   * is deliberately excluded — a factory caller never sets it). This is
+   * durable session data, so the session boundary validates and snapshots it
+   * before asynchronous setup begins.
    */
   readonly meta?: {
     readonly cwd?: string
@@ -82,6 +83,11 @@ export interface CreateAgentOptions {
     readonly origin?: 'subagent'
     readonly delegationDepth?: number
     readonly agentPreset?: string
+    /**
+     * Authenticated subject stamped into the session header's
+     * `owner` by the session boundary; omit on the ownerless path.
+     */
+    readonly owner?: string
   }
   /** Exact fork-inherited prefix length when the session metadata sets `isSeeded`. */
   readonly inheritedEventCount?: SessionLogOffset

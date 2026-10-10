@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   ApiSessionAgentController,
   ApiSessionCwdConflict,
+  ApiSessionNotFound,
 } from '../src/agent.ts'
 import { SessionCommandController } from '../src/commands.ts'
 import { installSessionReadTestServices, testSessionPersistence } from './test-remote.ts'
@@ -120,6 +121,10 @@ describe('Session creation failures', () => {
       code: 'session/conflict',
     },
     {
+      error: new ApiSessionNotFound('session "foreign" not found'),
+      code: 'session/not-found',
+    },
+    {
       error: new Error('factory unavailable'),
       code: 'gateway/internal',
     },
@@ -155,7 +160,7 @@ function completedSession(
   ctx: Context,
   id: string,
   cwd?: string,
-  lineage: { parentSession?: SessionId; origin?: 'subagent' } = {},
+  lineage: { parentSession?: SessionId; origin?: 'subagent'; owner?: string } = {},
 ) {
   const session = ctx.sessions.create(SessionId(id), {
     meta: { ...(cwd === undefined ? {} : { cwd }), ...lineage },
@@ -220,6 +225,30 @@ describe('Session fork failures', () => {
     await ctx.fiber.dispose()
   })
 
+  it('answers a foreign-owned source with not-found silence under a subject dispatch', async () => {
+    const ctx = await baseContext()
+    ctx.provide('workspaceRegistry', { list: () => [] } as never)
+    const slot = Symbol.for('dsh.session-controller.callerSubjectReader')
+    const store = globalThis as Record<symbol, unknown>
+    store[slot] = () => ({ subject: 'alice@example.com' })
+    try {
+      const source = ctx.sessions.create(SessionId('foreign-source'), {
+        meta: { cwd: '/workspace', owner: 'bob@example.com' },
+      })
+      source.append('turn/start', { turn: 1 })
+      source.append('user/message', createUserMessage({
+        content: [{ type: 'text', text: 'work' }], source: { kind: 'user' },
+      }), { surfaceOp: 'append' })
+      source.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+      const controller = new SessionCommandController(ctx, controllerAgents(), '/default')
+
+      await expectFailure(controller.fork({ sessionId: source.id }), 'session/not-found')
+    } finally {
+      Reflect.deleteProperty(store, slot)
+    }
+    await ctx.fiber.dispose()
+  })
+
   it('maps lineage lookup and Agent creation failures', async () => {
     const lineage = await baseContext()
     lineage.provide('workspaceRegistry', { list: () => [] } as never)
@@ -280,6 +309,32 @@ describe('Session fork failures', () => {
     const options = create.mock.calls[0]?.[0]
     if (options === undefined) throw new Error('Agent creation was not attempted')
     expect(options.meta?.agentPreset).toBe('minimal')
+    await ctx.fiber.dispose()
+  })
+
+  it('stamps the dispatch subject as the fork child owner', async () => {
+    const ctx = await baseContext()
+    ctx.provide('workspaceRegistry', { list: () => [] } as never)
+    const slot = Symbol.for('dsh.session-controller.callerSubjectReader')
+    const store = globalThis as Record<symbol, unknown>
+    store[slot] = () => ({ subject: 'alice@example.com' })
+    try {
+      const source = completedSession(ctx, 'owned-fork-source', '/workspace', {
+        owner: 'alice@example.com',
+      })
+      const create = vi.spyOn(ctx.agents, 'create').mockImplementation(
+        (options: CreateAgentOptions) => Promise.resolve(resolvedHandle(ctx, options.sessionId)),
+      )
+      const controller = new SessionCommandController(ctx, controllerAgents(), '/default')
+
+      const forked = await controller.fork({ sessionId: source.id })
+      expect(forked.sessionId).toMatch(/^session-/)
+      const options = create.mock.calls[0]?.[0]
+      if (options === undefined) throw new Error('Agent creation was not attempted')
+      expect(options.meta?.owner).toBe('alice@example.com')
+    } finally {
+      Reflect.deleteProperty(store, slot)
+    }
     await ctx.fiber.dispose()
   })
 })

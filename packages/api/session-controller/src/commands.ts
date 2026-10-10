@@ -32,6 +32,8 @@ import {
   hasApiSessionSubagentOwner,
   inspectApiSession,
 } from './agent.ts'
+import { currentCallerSubject, runWithCallerSubject } from './caller-subject.ts'
+import { isSessionAddressable } from './ownership.ts'
 import type {
   SessionAttachmentRequest,
   SessionAttachmentValue,
@@ -223,6 +225,13 @@ export class SessionCommandController {
       )
     }
     using source = observed
+    // Per-user fork rule: a subject forks only Sessions it owns; a foreign
+    // source answers with the same not-found silence as a missing one.
+    if (!isSessionAddressable(source.header)) {
+      throw new RemoteError('session/not-found', `session "${request.sessionId}" not found`, {
+        sessionId: request.sessionId,
+      })
+    }
     const lastSeq = source.events.at(-1)?.seq ?? -1
     const anchoredBoundary = atSeq === undefined
       ? undefined
@@ -253,6 +262,9 @@ export class SessionCommandController {
     }
     const childId = brandString<SessionId>(`session-${randomUUID()}`)
     const composition = await this.agents.composeAgent(this.agents.presetForObservation(source))
+    // The fork child belongs to the dispatch that cut it, exactly like a
+    // directly created Session; internal forks stay ownerless.
+    const owner = currentCallerSubject()
     try {
       const { provider, model } = this.ctx.agentDefaultModel.currentSelection()
       await this.ctx.agents.create({
@@ -266,6 +278,7 @@ export class SessionCommandController {
           ...(composition.agentPreset === undefined
             ? {}
             : { agentPreset: composition.agentPreset }),
+          ...(owner === undefined ? {} : { owner }),
         },
         agentOptions: { provider, model },
         setup: composition.setup,
@@ -369,7 +382,13 @@ export class SessionCommandController {
       }
       return { accepted: true }
     }
-    return hasImage ? this.agents.serializeImageAdmission(agent, admit) : admit()
+    // Drive the admitted turn under the Session owner's verified subject: the
+    // agent-loop driver chain starts inside this admission, so per-request MCP
+    // header resolution observes the owner on every tool call. Ownerless
+    // Sessions run with no subject, matching the ownerless header path.
+    const owner = agent.session.header.owner ?? undefined
+    return runWithCallerSubject(owner, () =>
+      hasImage ? this.agents.serializeImageAdmission(agent, admit) : admit())
   }
 
   /**
@@ -531,6 +550,9 @@ export class SessionCommandController {
     }
     if (error instanceof ApiSessionSubagentOwnership) {
       throw apiSessionSubagentOwnershipError(error.sessionId)
+    }
+    if (error instanceof ApiSessionNotFound) {
+      throw new RemoteError('session/not-found', error.message, { sessionId })
     }
     throw new RemoteError('gateway/internal', `failed to create session "${sessionId}": ${String(error)}`, {})
   }

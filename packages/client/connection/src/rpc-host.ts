@@ -10,6 +10,7 @@ import {
 import { clientRequestSchema } from './rpc-schema.ts'
 import { bridge } from './http-bridge.ts'
 import { isTrustedApiRequest } from './api-request-trust.ts'
+import { currentCallerSubject, runWithCallerSubject } from './caller-subject.ts'
 import { API_PATH } from './api-path.ts'
 import type { BrowserAuth } from './browser-auth.ts'
 import type {
@@ -66,11 +67,13 @@ export class HostConnectionService extends Service implements HostConnectionHand
    * @param ctx - owning Connection plugin context.
    * @param trustedHosts - deployment authorities accepted by the Host/Origin fence.
    * @param browserAuth - process token and persistent browser-session owner.
+   * @param iframeTrustedOrigins - origins allowed for cross-site iframe embedding.
    */
   constructor(
     ctx: Context,
     private readonly trustedHosts: readonly string[],
     private readonly browserAuth: BrowserAuth,
+    private readonly iframeTrustedOrigins: readonly string[] = [],
   ) {
     super(ctx, 'connection')
   }
@@ -95,18 +98,33 @@ export class HostConnectionService extends Service implements HostConnectionHand
 
   /** Apply the configured Host/Origin fence, then browser authentication. */
   requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection {
-    if (!isTrustedApiRequest(request, this.trustedHosts)) return 403
+    if (!isTrustedApiRequest(request, this.trustedHosts, this.iframeTrustedOrigins)) return 403
     return this.browserAuth.isAuthenticated(request) ? undefined : 401
   }
 
   /** Authenticate an index request through the process-token exchange or cookie. */
-  authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): boolean {
+  async authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): Promise<boolean> {
     return this.browserAuth.authorizeIndex(request, response)
   }
 
   /** Add this process's launch token to the clean application URL. */
   authenticatedUrl(baseUrl: string): string {
     return this.browserAuth.authenticatedUrl(baseUrl)
+  }
+
+  /** Read the verified per-user subject carried by an authenticated cookie. */
+  authenticatedSubject(request: ConnectionTrustRequest): string | undefined {
+    return this.browserAuth.authenticatedSubject(request)
+  }
+
+  /** Run one dispatch with the verified caller subject inherited by callees. */
+  asCallerSubject<T>(subject: string | undefined, operation: () => T): T {
+    return runWithCallerSubject(subject, operation)
+  }
+
+  /** Read the subject inherited by the authenticated dispatch being serviced. */
+  currentCallerSubject(): string | undefined {
+    return currentCallerSubject()
   }
 
   /**

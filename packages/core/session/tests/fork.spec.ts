@@ -74,6 +74,23 @@ describe('SessionStore.fork', () => {
     expect(child.inheritedEventCount).toBe(0)
   })
 
+  it('inherits the source owner into the forked child header', async () => {
+    const { ctx, sessions } = await setup()
+    const source = ctx.sessions.create(SessionId('owned-parent'), {
+      meta: { cwd: '/workspace', owner: 'alice@example.com' },
+    })
+    appendClosedTurn(source, 1, 'hello')
+
+    const child = sessions.fork(source, undefined, SessionId('owned-child'))
+
+    expect(child.header).toMatchObject({
+      id: SessionId('owned-child'),
+      parentSession: SessionId('owned-parent'),
+      isSeeded: true,
+      owner: 'alice@example.com',
+    })
+  })
+
   it('forks the latest completed boundary by default into detached frozen seed events', async () => {
     const { ctx, sessions } = await setup()
     const source = ctx.sessions.create(SessionId('parent'), { meta: { cwd: '/workspace' } })

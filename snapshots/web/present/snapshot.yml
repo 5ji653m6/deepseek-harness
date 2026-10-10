@@ -7,3 +7,6 @@ header:
   class: web-ptc
 workspace:
   final: true
+sessionFormat:
+  version: 3
+  coverage: [adjacent-migration]

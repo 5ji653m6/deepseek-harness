@@ -920,4 +920,26 @@ describe('Session history raw journal', () => {
       await ctx.fiber.dispose()
     }
   })
+
+  it('answers a foreign-owned page read with not-found silence under a subject dispatch', async () => {
+    const { ctx } = await harness()
+    const remote = createSessionTestRemote(ctx, { defaultModelSelection: () => ({ provider: 'p', model: 'm' }), cwd: '/tmp' })
+    const session = ctx.sessions.create(undefined, {
+      meta: { cwd: '/workspace', owner: 'bob@example.com' },
+    })
+    session.append('turn/start', { turn: 1 })
+    const slot = Symbol.for('dsh.session-controller.callerSubjectReader')
+    const store = globalThis as Record<symbol, unknown>
+    store[slot] = () => ({ subject: 'alice@example.com' })
+    try {
+      const response = await remote.page({
+        address: { kind: 'session', sessionId: session.id },
+        throughSeq: session.seq - 1,
+      })
+      expect(response).toMatchObject({ ok: false, error: { code: 'session/not-found' } })
+    } finally {
+      Reflect.deleteProperty(store, slot)
+    }
+    await ctx.fiber.dispose()
+  })
 })

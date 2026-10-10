@@ -86,9 +86,15 @@ function isTrustedAuthority(hostUrl: URL, trustedHosts: readonly string[]): bool
  * Decide whether one /api request may reach the RPC bridge.
  * @param request - Node HTTP or Fetch request facts (headers).
  * @param trustedHosts - non-loopback authorities this deployment serves: exact `host:port`, or port-less `host` matching any port.
- * @returns true when the Host is ours (loopback or trusted) and any attached browser markers are same-origin.
+ * @param iframeTrustedOrigins - optional origins allowed for cross-site iframe embedding (e.g., Frappe desk pages).
+ * @returns true when the Host is ours (loopback or trusted) and any attached
+ *   browser markers are same-origin or from a trusted iframe origin.
  */
-export function isTrustedApiRequest(request: ConnectionTrustRequest, trustedHosts: readonly string[]): boolean {
+export function isTrustedApiRequest(
+  request: ConnectionTrustRequest,
+  trustedHosts: readonly string[],
+  iframeTrustedOrigins?: readonly string[],
+): boolean {
   // Host fence (DNS-rebinding defense), applied to every request: the browser
   // fills Host from the URL it believes it is talking to, so a rebound page
   // carries the attacker's domain here even though the socket lands on this
@@ -102,16 +108,53 @@ export function isTrustedApiRequest(request: ConnectionTrustRequest, trustedHost
   if (hostUrl === undefined) return false
   if (!isLoopbackHostname(hostUrl.hostname) && !isTrustedAuthority(hostUrl, trustedHosts)) return false
   // Cross-site fence: modern browsers label the initiator relationship on
-  // every fetch; an explicit cross-site marker is refused regardless of Origin.
-  if (header(request.headers, 'sec-fetch-site') === 'cross-site') return false
+  // every fetch; an explicit cross-site marker is refused unless the origin
+  // is in the configured iframe trusted origins (for Frappe desk embedding).
+  const fetchSite = header(request.headers, 'sec-fetch-site')
+  if (fetchSite === 'cross-site') {
+    const origin = header(request.headers, 'origin')
+    if (origin === undefined || !isIframeTrustedOrigin(origin, iframeTrustedOrigins)) {
+      return false
+    }
+  }
   // Origin fence: when a browser attaches an Origin it must be exactly this
-  // authority (compared through the same normalization as the Host). Absent
-  // Origin is fine — the Host fence above already bound the request. The
-  // literal "null" (sandboxed iframes, file: pages) is an opaque origin, refused.
+  // authority (compared through the same normalization as the Host) or a
+  // trusted iframe origin. Absent Origin is fine — the Host fence above
+  // already bound the request. The literal "null" (sandboxed iframes, file:
+  // pages) is an opaque origin, refused.
   const origin = header(request.headers, 'origin')
   if (origin === undefined) return true
+  if (isIframeTrustedOrigin(origin, iframeTrustedOrigins)) return true
   try {
     return new URL(origin).host === hostUrl.host
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Whether the origin matches one of the configured iframe trusted origins.
+ * @param origin - the Origin header value from the request.
+ * @param iframeTrustedOrigins - optional list of trusted origins (full URLs like "http://frappe.example.com").
+ * @returns true when the origin's protocol and host match a trusted entry.
+ */
+function isIframeTrustedOrigin(
+  origin: string,
+  iframeTrustedOrigins?: readonly string[],
+): boolean {
+  if (iframeTrustedOrigins === undefined || iframeTrustedOrigins.length === 0) {
+    return false
+  }
+  try {
+    const originUrl = new URL(origin)
+    return iframeTrustedOrigins.some((trusted) => {
+      try {
+        const trustedUrl = new URL(trusted)
+        return originUrl.protocol === trustedUrl.protocol && originUrl.host === trustedUrl.host
+      } catch {
+        return false
+      }
+    })
   } catch {
     return false
   }

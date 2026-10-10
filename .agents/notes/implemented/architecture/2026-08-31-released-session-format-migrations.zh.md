@@ -202,3 +202,13 @@ Read-only access 会在 durable publication 前消费 Stage 结果；write open 
 - **全局复用有状态 codec instance**——会让不同 Session 的 pending attempt、mapping 与 counter 相互污染。
 - **持久化每个中间格式版本**——产生没有 runtime consumer 的 durable state；只需要精确 source 与最终 current generation。
 - **让 mounted plugin 注册 migration**——使历史可读性依赖部署。Static catalog 必须在 feature plugin 挂载前恢复已发布格式。
+
+## V3 到 V4：仅头部的相邻迁移（2026-09-21）
+
+v3-to-v4 边演示了仅元数据新增的相邻迁移规则。可选的按用户 `owner` 作为 Session 格式 V4 唯一的结构新增引入，为按用户 Web 登录后创建的会话盖章。
+
+- 逻辑头部将 `version: 3` 重盖章为 `version: 4`，并新增可选 `owner`。所有其他字段保持不变。
+- Stage 原样通过每个事件行与继承切点。播种切点推导复用 v2-to-v3 的标记语义；无标记的播种日志与带标记的未播种日志被拒绝。
+- 编解码器将帧格式委托给冻结的 v3 编解码器。恢复器剥离 owner 并重盖章版本，再委托给冻结的 v3 关系校验器。
+- `SESSION_FORMAT_VERSION` 升至 4。已提交的 v3 世代从不改写。现有 v3 记录仍然有效；目录将其恢复为无 owner 的 v4。
+- [v3-to-v4 包](../../../../packages/session/session-format-v3-to-v4/README.zh.md)是本边的唯一规范。[2026-09-15 per-user web GUI 持久化记录](../../../../docs/persistence-changes/2026-09-15-per-user-web-gui.zh.md)记录了兼容性说明。

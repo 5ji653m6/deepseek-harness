@@ -5,3 +5,6 @@ composition: acp-default
 recording: authored
 header:
   class: acp-default
+sessionFormat:
+  version: 3
+  coverage: [adjacent-migration]

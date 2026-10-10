@@ -6,3 +6,6 @@ recording: live
 header:
   class: web-cordis
   pin: true
+sessionFormat:
+  version: 3
+  coverage: [adjacent-migration]

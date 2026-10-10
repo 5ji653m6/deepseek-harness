@@ -206,6 +206,7 @@ export type SessionResultFilter =
   | ({ kind: 'created-at' } & SessionResultRange)
   | { kind: 'parent'; values: readonly (SessionId | null)[] }
   | { kind: 'availability'; values: readonly SessionAvailability[] }
+  | { kind: 'owner'; values: readonly (string | null)[] }
 
 /**
  * One event predicate. A filter array is ANDed; list-valued clauses are ORed.

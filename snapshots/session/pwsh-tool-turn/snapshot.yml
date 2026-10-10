@@ -7,3 +7,6 @@ header:
   class: pwsh
   pin: true
 platform: pwsh
+sessionFormat:
+  version: 3
+  coverage: [adjacent-migration]

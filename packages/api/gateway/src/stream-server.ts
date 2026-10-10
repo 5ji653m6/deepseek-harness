@@ -16,6 +16,13 @@ export type RemoteStreamOpener = (
   signal: AbortSignal,
 ) => Promise<AsyncIterable<unknown>>
 
+/**
+ * Run one logical stream's open dispatch inside the caller boundary captured
+ * at HTTP upgrade time. The mux stays transport-pure: the Gateway supplies
+ * the wrapper, so no ws event timing assumption carries the caller subject.
+ */
+export type RemoteStreamDispatch = <T>(operation: () => T) => T
+
 /** Convert an invocation or carrier failure to a stable wire value. */
 export type RemoteStreamFailureMapper = (error: unknown) => RemoteStreamFailure
 
@@ -44,13 +51,15 @@ export class RemoteStreamMuxServer {
    * @param req - authenticated HTTP upgrade request.
    * @param socket - carrier socket transferred to the WebSocket server.
    * @param head - bytes already read after the HTTP upgrade headers.
+   * @param dispatch - per-connection caller boundary every logical stream on
+   *   this socket runs inside; omission runs streams unwrapped.
    */
-  handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
+  handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer, dispatch?: RemoteStreamDispatch): void {
     this.server.handleUpgrade(req, socket, head, (websocket) => {
       this.missedHeartbeats.set(websocket, 0)
       websocket.on('pong', () => { this.missedHeartbeats.set(websocket, 0) })
       this.startHeartbeat()
-      const connection = new RemoteStreamMuxConnection(websocket, this.open, this.failure)
+      const connection = new RemoteStreamMuxConnection(websocket, this.open, this.failure, dispatch)
       const done = connection.run()
       this.connections.add(done)
       void done.then(() => { this.connections.delete(done) })
@@ -107,6 +116,7 @@ class RemoteStreamMuxConnection {
     private readonly socket: WebSocket,
     private readonly open: RemoteStreamOpener,
     private readonly failure: RemoteStreamFailureMapper,
+    private readonly dispatch: RemoteStreamDispatch = operation => operation(),
   ) {}
 
   async run(): Promise<void> {
@@ -159,7 +169,7 @@ class RemoteStreamMuxConnection {
     active: ActiveStream,
   ): Promise<void> {
     try {
-      const source = await this.open(endpoint, payload, active.abort.signal)
+      const source = await this.dispatch(() => this.open(endpoint, payload, active.abort.signal))
       for await (const value of source) {
         await this.send({ type: 'item', streamId, value })
       }

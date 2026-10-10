@@ -6,3 +6,6 @@ recording: authored
 header:
   class: web-schedule
   pin: true
+sessionFormat:
+  version: 3
+  coverage: [adjacent-migration]

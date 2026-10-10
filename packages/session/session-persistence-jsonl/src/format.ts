@@ -23,7 +23,7 @@ import { parseSessionFormatLogFilename, sessionFormatLogFilename, SessionFormatU
 import type { SessionFormatEvent } from '@deepseek-ai/dsh-session-format'
 import type { SessionFormatRecovery, SessionFormatRestore } from '@deepseek-ai/dsh-session-format'
 import { sessionFormatCatalog } from '@deepseek-ai/dsh-session-format-catalog'
-import { assertV3RowAdmission } from '@deepseek-ai/dsh-session-format-v2-to-v3'
+import { assertV4RowAdmission } from '@deepseek-ai/dsh-session-format-v3-to-v4'
 import {
   SessionFormatUnsupportedError,
   sessionFormatVersionRefusal,
@@ -90,10 +90,12 @@ interface HeaderLine {
   origin?: 'subagent'
   delegationDepth: number
   agentPreset?: string
+  /** Authenticated subject owning the session; absent on ownerless logs. */
+  owner?: string
 }
 
 const HEADER_REQUIRED_KEYS = ['type', 'version', 'id', 'createdAt', 'isSeeded', 'delegationDepth'] as const
-const HEADER_OPTIONAL_KEYS = ['cwd', 'parentSession', 'origin', 'agentPreset'] as const
+const HEADER_OPTIONAL_KEYS = ['cwd', 'parentSession', 'origin', 'agentPreset', 'owner'] as const
 const HEADER_KEYS = new Set<string>([...HEADER_REQUIRED_KEYS, ...HEADER_OPTIONAL_KEYS])
 
 /**
@@ -149,6 +151,7 @@ function fromHeaderLine(line: HeaderLine): SessionStorageMetadata {
       ...line.origin !== undefined ? { origin: line.origin } : {},
       delegationDepth: line.delegationDepth,
       ...line.agentPreset !== undefined ? { agentPreset: line.agentPreset } : {},
+      ...line.owner !== undefined ? { owner: line.owner } : {},
     },
     inheritedEventCount: SessionLogOffset(0),
   }
@@ -181,6 +184,8 @@ function isHeaderLine(value: unknown): value is HeaderLine {
       || (value as { origin?: unknown }).origin === 'subagent')
     && ((value as { agentPreset?: unknown }).agentPreset === undefined
       || typeof (value as { agentPreset?: unknown }).agentPreset === 'string')
+    && ((value as { owner?: unknown }).owner === undefined
+      || typeof (value as { owner?: unknown }).owner === 'string')
   )
 }
 
@@ -488,7 +493,7 @@ export class SessionLogScanner {
     // This scanner accepts only current-generation files. Owned structural refusal must
     // precede its recoverable-tail suppression, independently of the strict decoder state.
     try {
-      assertV3RowAdmission(decoded)
+      assertV4RowAdmission(decoded)
     } catch (error: unknown) {
       if (error instanceof SessionFormatUnsupportedMigrationError) throw new SessionFormatUnsupportedError(error.message)
       throw error
@@ -502,7 +507,7 @@ export class SessionLogScanner {
     try {
       this.restore.decodeRow(decoded)
     } catch (error: unknown) {
-      // Unsupported V3 rows have already been refused before recovery.
+      // Unsupported V4 rows have already been refused before recovery.
       /* v8 ignore next -- every production Session format decoder rejects with Error. */
       const detail = error instanceof Error ? error.message : String(error)
       const issue = new Error(`corrupt session log: invalid committed event at line ${this.eventLine}: ${detail}`, {

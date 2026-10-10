@@ -7,3 +7,6 @@ header:
   class: web-default
 replay:
   override: true
+sessionFormat:
+  version: 3
+  coverage: [adjacent-migration]

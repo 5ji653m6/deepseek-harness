@@ -119,6 +119,7 @@ type SessionResultFilter =
   | ({ kind: 'created-at' } & SessionResultRange)
   | { kind: 'parent'; values: readonly (SessionId | null)[] }
   | { kind: 'availability'; values: readonly SessionAvailability[] }
+  | { kind: 'owner'; values: readonly (string | null)[] }
 ```
 
 ```ts type-equiv

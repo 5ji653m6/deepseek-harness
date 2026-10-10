@@ -8,3 +8,6 @@ header:
   pin: true
   systemPromptSource: fresh-round-trip
   toolSchemasSource: fresh-round-trip
+sessionFormat:
+  version: 3
+  coverage: [adjacent-migration]

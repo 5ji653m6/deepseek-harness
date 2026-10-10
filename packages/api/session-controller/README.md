@@ -39,6 +39,8 @@ The user-invocable `skills/list` metadata includes the winning provider’s opti
 
 Fork copies history through the selected completed turn, including its `turn/end`. Events after that point, including queued input and model-setting changes, are excluded. An omitted or past-end anchor selects the last completed turn; an anchor inside an unfinished turn is rejected.
 
+In per-user deployments (the browser authenticated through the HRMS login route), `SessionHeader.owner` carries the verified subject that created the Session. List and search filter rows by owner — a subject sees only Sessions it owns, and the ownerless process-token path sees only ownerless Sessions. Resume, adoption, history page/follow, fork, and log export check the same ownership and answer a foreign Session with the same not-found silence a missing one produces. Internal Host work (no active browser dispatch) keeps full access, so background drivers remain unaffected. Prompt admission drives each admitted turn under the Session owner's subject through the process-global caller-subject runner that Connection publishes: the agent-loop driver chain starts inside the admission, so per-request MCP header resolution observes the owner on every tool call and an ownerless Session's loop presents no `X-HRMS-*` headers.
+
 <a id="session-media-references"></a>
 ## Session media references
 

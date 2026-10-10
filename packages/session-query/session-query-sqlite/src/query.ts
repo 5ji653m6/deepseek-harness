@@ -159,6 +159,9 @@ export function buildSessionWhere(filters: readonly SessionResultFilter[]): SqlW
       case 'parent':
         addNullableList(clauses, params, 'parent_session', filter.values)
         break
+      case 'owner':
+        addNullableList(clauses, params, 'owner', filter.values)
+        break
       case 'availability': {
         const availability = [...new Set(filter.values)]
         if (availability.length === 0) clauses.push('0')

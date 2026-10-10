@@ -20,7 +20,10 @@ export interface SnapshotCorpusGenerationSummary {
   readonly retainedScenarios: number
 }
 
-const MAX_RETAINED_ROLES = 10
+// V4 gives every scenario an adjacent-migration predecessor, so the retained
+// role count is bounded by the scenario inventory rather than by the handful of
+// deliberate historical cases the V0-era ceiling of 10 was sized for.
+const MAX_RETAINED_ROLES = 50
 const REQUIRED_V0_COVERAGE = new Set([
   'multi-hop',
   'packed-row',

@@ -217,7 +217,11 @@ export class TypertGatewayService extends Service implements TypertGateway {
               rejectRemoteStreamUpgrade(socket, rejection)
               return
             }
-            mux.handleUpgrade(req, socket, head)
+            // Inherit the verified cookie subject through every logical
+            // stream this socket opens, so stream callees observe the same
+            // caller boundary as the /api HTTP dispatches.
+            mux.handleUpgrade(req, socket, head, operation =>
+              webCtx.connection.asCallerSubject(webCtx.connection.authenticatedSubject(req), operation))
           },
         }
         const unregister = webCtx.webServer.registerUpgrade(route)

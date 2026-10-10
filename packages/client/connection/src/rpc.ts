@@ -189,7 +189,7 @@ export interface HostConnectionHandle {
    * @param response - response owned when the result is false.
    * @returns true only when the frontend may serve index.html.
    */
-  authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): boolean
+  authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): Promise<boolean>
 
   /**
    * Add the fresh process token to an ordinary Web application URL.
@@ -197,6 +197,32 @@ export interface HostConnectionHandle {
    * @returns root URL accepted by {@link authorizeIndex} for initial login.
    */
   authenticatedUrl(baseUrl: string): string
+
+  /**
+   * Read the per-user subject carried by an authenticated browser cookie.
+   * The process-token path reads `undefined`, so single-operator deployments
+   * observe no identity.
+   * @param request - request headers from the HTTP or upgrade request.
+   * @returns the verified subject, or undefined for a subject-less cookie.
+   */
+  authenticatedSubject(request: ConnectionTrustRequest): string | undefined
+
+  /**
+   * Run one dispatch with the verified subject of its request, so callees
+   * servicing the dispatch read it through {@link currentCallerSubject}
+   * without receiving the transport request.
+   * @param subject - verified subject, or undefined for a subject-less cookie.
+   * @param operation - dispatch to execute inside the inherited boundary.
+   * @returns the exact value returned by the operation.
+   */
+  asCallerSubject<T>(subject: string | undefined, operation: () => T): T
+
+  /**
+   * Read the subject of the authenticated dispatch currently being serviced.
+   * @returns the verified subject inherited by the active dispatch, or
+   *   undefined outside an authenticated dispatch or on the ownerless path.
+   */
+  currentCallerSubject(): string | undefined
 }
 
 /** Transport-independent Fetch handler used by HTTP and worker carriers. */

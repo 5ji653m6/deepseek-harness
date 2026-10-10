@@ -201,8 +201,12 @@ it('keeps a current-writer majority plus bounded declared historical migration c
       : { retained: scenario.manifest.sessionFormat }),
   })))
 
+  // 39 scenarios retain a historical generation: the four deliberate V0 cases
+  // carried by REQUIRED_V0_COVERAGE, plus one adjacent-migration predecessor per
+  // scenario pinned below the current writer. Roles exceed scenarios by the two
+  // child ordinals subagent-multi retains alongside its parent.
   expect(assertSnapshotCorpusPolicy(inventory)).toMatchObject({
-    retainedRoles: 9,
-    retainedScenarios: 7,
+    retainedRoles: 41,
+    retainedScenarios: 39,
   })
 })

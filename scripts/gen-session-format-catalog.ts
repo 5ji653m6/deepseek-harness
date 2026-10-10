@@ -167,6 +167,23 @@ export function collectSessionFormatMigrations(
   return declarations
 }
 
+/** Line width `@stylistic/max-len` enforces on generated source. */
+const MAX_GENERATED_LINE = 140
+
+/**
+ * Render the codec list, wrapping one codec per line when the inline form would
+ * exceed {@link MAX_GENERATED_LINE}. The list grows by one entry per released
+ * format generation, so it eventually outgrows a single line.
+ * @param codecs - released codec names in version order.
+ * @returns the indented source lines for the `codecs` property.
+ */
+function codecLines(codecs: readonly string[]): string[] {
+  const inline = `  codecs: [${codecs.join(', ')}],`
+  return inline.length <= MAX_GENERATED_LINE
+    ? [inline]
+    : ['  codecs: [', ...codecs.map(codec => `    ${codec},`), '  ],']
+}
+
 /**
  * Render the deterministic direct-import catalog source.
  * @param declarations - validated adjacent migrations in version order.
@@ -209,7 +226,7 @@ export function renderSessionFormatCatalog(
     '/** Physical codec dispatch and complete adjacent chain, independent of mounted plugins. */',
     'export const sessionFormatCatalog = createSessionFormatCatalog({',
     `  currentVersion: ${currentVersion},`,
-    `  codecs: [${codecs.join(', ')}],`,
+    ...codecLines(codecs),
     `  currentEncoder: ${currentCodec},`,
     `  migrations: [${declarations.map(item => item.migration).join(', ')}],`,
     '  restoreCurrent(artifact) {',

@@ -59,6 +59,7 @@ export type * from './types.ts'
 export { ApiSessionNotFound } from './agent.ts'
 export { SessionFileReferences } from './file-references.ts'
 export { SessionSkillCatalog } from './skill-catalog.ts'
+export { isSessionAddressable, assertSessionAddressable } from './ownership.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {

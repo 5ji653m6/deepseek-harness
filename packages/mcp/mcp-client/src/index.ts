@@ -30,6 +30,21 @@ export type { ReconnectConfig, ResolvedReconnectPolicy } from './connection.ts'
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'mcp-client'
 
+/**
+ * Per-request HRMS header source provided by dsh-client-connection when the
+ * deployment serves per-user logins. Consulted through `ctx.get` when each
+ * request is issued — never at plugin apply and never via a value import of
+ * dsh-client-connection — so cordis activation order between this plugin and
+ * client-connection cannot skip the wiring.
+ */
+interface HrmsRequestHeaders {
+  /**
+   * Resolve the `X-HRMS-*` header set for one caller subject from the
+   * server-held token vault; the ownerless path resolves no headers.
+   */
+  resolveFor(subject: string | undefined): Record<string, string>
+}
+
 /** Services required by this plugin. */
 export const inject = ['tools']
 
@@ -90,6 +105,14 @@ export interface StreamableHttpConfig {
   url: string
   /** Additional headers attached to MCP requests. */
   headers: Record<string, string>
+  /**
+   * Resolve per-request request headers from the caller subject active when
+   * each request is issued. Wired automatically from the HRMS header source
+   * when dsh-client-connection serves per-user logins; a programmatic config
+   * may supply its own resolver. Absent keeps the static `headers` behavior
+   * byte-identical.
+   */
+  resolveRequestHeaders?: (subject: string | undefined) => Record<string, string>
   /** Timeout per tool call or resource request in milliseconds. */
   toolCallTimeoutMs: number
   /** Fail plugin activation when the initial connection or tool synchronization fails. */
@@ -106,7 +129,7 @@ export type Config = StdioConfig | StreamableHttpConfig
 type StdioConfigInput = Omit<StdioConfig, 'args' | 'env' | 'cwd' | 'toolCallTimeoutMs' | 'failOnStartupError'>
   & Partial<Pick<StdioConfig, 'args' | 'env' | 'cwd' | 'toolCallTimeoutMs' | 'failOnStartupError'>>
 type StreamableHttpConfigInput = Omit<StreamableHttpConfig, 'headers' | 'toolCallTimeoutMs' | 'failOnStartupError'>
-  & Partial<Pick<StreamableHttpConfig, 'headers' | 'toolCallTimeoutMs' | 'failOnStartupError'>>
+  & Partial<Pick<StreamableHttpConfig, 'headers' | 'resolveRequestHeaders' | 'toolCallTimeoutMs' | 'failOnStartupError'>>
 type ConfigInput = StdioConfigInput | StreamableHttpConfigInput
 
 const Reconnect: z<ReconnectConfig> = z.object({
@@ -157,6 +180,32 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // effect registers.
   const reconnect = resolveReconnectPolicy(config.reconnect, `mcp-client(${config.serverName}): reconnect`)
 
+  // Per-user HRMS deployments: dsh-client-connection provides the request
+  // header source backed by the server-held token vault, and the transport
+  // resolves the caller subject per request. The source is consulted WHEN
+  // EACH REQUEST IS ISSUED, not at apply: cordis activation order does not
+  // guarantee client-connection has provided the service by this plugin's
+  // apply (a live profile applies an MCP client first), and an apply-time
+  // read silently skipped the wiring, leaving every request carrying the
+  // static empty X-HRMS-* placeholders. Absent service at request time
+  // (single-operator mode) resolves no headers, keeping today's static
+  // `headers` behavior; a present-but-malformed source fails loud per
+  // request instead of silently skipping.
+  const effectiveConfig: Config = config.transport === 'streamable-http'
+    && config.resolveRequestHeaders === undefined
+    ? {
+      ...config,
+      resolveRequestHeaders: (subject: string | undefined): Record<string, string> => {
+        const headerSource = ctx.get('hrmsRequestHeaders') as HrmsRequestHeaders | undefined
+        if (headerSource === undefined) return {}
+        if (typeof headerSource.resolveFor !== 'function') {
+          throw new Error('mcp-client: the hrmsRequestHeaders service does not expose resolveFor(subject) — fix the dsh-client-connection deployment')
+        }
+        return headerSource.resolveFor(subject)
+      },
+    }
+    : config
+
   // Reserve the namespace next: a duplicate `serverName` fails THIS instance
   // at load with an actionable error and leaves the earlier instance intact.
   ctx.effect(() => {
@@ -178,7 +227,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // The supervisor owns the client/transport generations, the reconnect
   // loop, and the live tool registrations; disposal stops reconnection,
   // quiesces in-flight work, and unregisters the current generation.
-  const connection = startConnection(ctx, config, reconnect)
+  const connection = startConnection(ctx, effectiveConfig, reconnect)
   registerServerContext(ctx, config.serverName, connection)
   let stopping: Promise<void> | undefined
   const dispose = (): Promise<void> => stopping ??= connection.dispose()

@@ -182,6 +182,60 @@ describe('session.search', () => {
     expect(exec.signal).toBe(signal)
   })
 
+  it('searches only Sessions owned by the dispatch subject', async () => {
+    const ctx = await baseContext()
+    const owned = { ...header('owned-alice'), owner: 'alice@example.com' }
+    const foreign = { ...header('owned-bob'), owner: 'bob@example.com' }
+    const shared = header('ownerless')
+    for (const meta of [owned, foreign, shared]) {
+      ctx.sessions.create(meta.id, { meta })
+    }
+    const searchSessions = vi.fn((_request: SessionSearchRequest) => Promise.resolve({
+      items: [hit('owned-alice', 0), hit('owned-bob', 1), hit('ownerless', 2)],
+    }))
+    installSearchQuery(ctx, searchSessions)
+    const remote = createSessionTestRemote(ctx, defaults)
+    const slot = Symbol.for('dsh.session-controller.callerSubjectReader')
+    const store = globalThis as Record<symbol, unknown>
+    store[slot] = () => ({ subject: 'alice@example.com' })
+    try {
+      const response = await remote.search(request('match'), new AbortController().signal)
+      expect(response).toEqual({
+        ok: true,
+        value: { items: [{ sessionId: 'owned-alice', snippet: 'match 0' }], hasMore: false },
+      })
+      expect(searchSessions).toHaveBeenCalledOnce()
+    } finally {
+      Reflect.deleteProperty(store, slot)
+    }
+    await ctx.fiber.dispose()
+  })
+
+  it('searches only ownerless Sessions for the process-token dispatch', async () => {
+    const ctx = await baseContext()
+    const owned = { ...header('owned-alice'), owner: 'alice@example.com' }
+    const shared = header('ownerless')
+    ctx.sessions.create(owned.id, { meta: owned })
+    ctx.sessions.create(shared.id, { meta: shared })
+    installSearchQuery(ctx, () => Promise.resolve({
+      items: [hit('owned-alice', 0), hit('ownerless', 1)],
+    }))
+    const remote = createSessionTestRemote(ctx, defaults)
+    const slot = Symbol.for('dsh.session-controller.callerSubjectReader')
+    const store = globalThis as Record<symbol, unknown>
+    store[slot] = () => ({ subject: undefined })
+    try {
+      const response = await remote.search(request('match'), new AbortController().signal)
+      expect(response).toEqual({
+        ok: true,
+        value: { items: [{ sessionId: 'ownerless', snippet: 'match 1' }], hasMore: false },
+      })
+    } finally {
+      Reflect.deleteProperty(store, slot)
+    }
+    await ctx.fiber.dispose()
+  })
+
   it('rejects invalid wire queries before invoking the search provider', async () => {
     const ctx = await baseContext()
     ctx.sessions.create(sid('visible'), { meta: header('visible') })

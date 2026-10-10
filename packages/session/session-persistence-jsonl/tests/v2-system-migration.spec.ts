@@ -95,7 +95,7 @@ function assertRequestHistory(events: readonly SessionEvent[], handle: SessionHa
 }
 
 describe('V2 system prompts through current Session and JSONL persistence', () => {
-  it.each([undefined, ''])('prepares prompts and clear (%j) read-only, then publishes V3 without replacing V2', async (clear) => {
+  it.each([undefined, ''])('prepares prompts and clear (%j) read-only, then publishes V4 without replacing V2', async (clear) => {
     const sourcePath = await writeV2([
       { type: 'turn/start', data: { turn: 1 } },
       { type: 'step/start', data: { turn: 1, step: 1 } },
@@ -110,7 +110,7 @@ describe('V2 system prompts through current Session and JSONL persistence', () =
     const reader = await ctx.sessionPersistence.open(id, 'read')
     let prepared: readonly SessionEvent[]
     try {
-      expect(reader.header.version).toBe(3)
+      expect(reader.header.version).toBe(4)
       prepared = (await reader.read()).events
       expect(prepared.map(event => event.seq)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
       expect(prepared.filter(event => event.type !== 'system/message').map(event => [event.type, event.time])).toEqual([
@@ -156,10 +156,10 @@ describe('V2 system prompts through current Session and JSONL persistence', () =
     }
     expect(await observeFile(sourcePath)).toEqual(original)
     expect((await readdir(directory)).filter(name => name.endsWith('.jsonl')).sort())
-      .toEqual(['session.v2.jsonl', 'session.v3.jsonl'])
-    const publishedPath = generationLogPath(root, undefined, id, 3, 'none')
+      .toEqual(['session.v2.jsonl', 'session.v4.jsonl'])
+    const publishedPath = generationLogPath(root, undefined, id, 4, 'none')
     const published = (await readFile(publishedPath, 'utf8')).trimEnd().split('\n').map(line => JSON.parse(line) as unknown)
-    expect(published[0]).toMatchObject({ type: 'session', version: 3, id })
+    expect(published[0]).toMatchObject({ type: 'session', version: 4, id })
     expect(published.slice(1)).toEqual(prepared)
 
     const reopened = await mount()
@@ -268,7 +268,7 @@ describe('V2 system prompts through current Session and JSONL persistence', () =
       .toEqual(['session.v1.jsonl', 'session.v2.jsonl'])
   })
 
-  it('persists native V3 system appends after the protected head without converting them to user messages', async () => {
+  it('persists native V4 system appends after the protected head without converting them to user messages', async () => {
     const ctx = await mount()
     const session = Session.create(id)
     const writer = await ctx.sessionPersistence.create(session.header)

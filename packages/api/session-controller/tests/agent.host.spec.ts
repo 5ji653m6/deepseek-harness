@@ -215,6 +215,87 @@ describe('ApiSession Agent lookup and recovery', () => {
     })
   })
 
+  it('returns the raced subagent failure when the failed resume published a child Agent', async () => {
+    const { ctx, agents } = await harness()
+    const meta = header('child-agent-race')
+    providePersistence(ctx, {
+      list: () => Promise.resolve([meta]),
+      inspect: () => Promise.resolve({ meta, events: [] }),
+    })
+    vi.spyOn(ctx.agents, 'resume').mockImplementation(async () => {
+      const childSession = ctx.sessions.create(meta.id, {
+        meta: { ...meta, parentSession: SessionId('parent'), origin: 'subagent' },
+      })
+      await ctx.agents.register({ id: meta.id, session: childSession, status: 'idle', ctx } as Agent)
+      throw new Error('raced child Agent publication')
+    })
+
+    await expect(agents.resolveAgent(meta.id)).resolves.toMatchObject({
+      error: { code: 'session/agent-busy' },
+    })
+  })
+
+  it('converts a raced ownership denial into not-found silence', async () => {
+    const { ctx, agents } = await harness()
+    const stored = { ...header('raced-foreign-win'), owner: 'alice@example.com' }
+    providePersistence(ctx, {
+      list: () => Promise.resolve([stored]),
+      inspect: () => Promise.resolve({ meta: stored, events: [] }),
+    })
+    vi.spyOn(ctx.agents, 'resume').mockImplementation(async () => {
+      // Another subject's creation wins the identity while this resume fails.
+      const foreign = agent(ctx, { ...header('raced-foreign-win'), owner: 'bob@example.com' })
+      await ctx.agents.register(foreign)
+      throw new Error('raced foreign publication')
+    })
+    const slot = Symbol.for('dsh.session-controller.callerSubjectReader')
+    const store = globalThis as Record<symbol, unknown>
+    store[slot] = () => ({ subject: 'alice@example.com' })
+    try {
+      await expect(agents.resolveAgent(stored.id)).resolves.toMatchObject({
+        error: { code: 'session/not-found' },
+      })
+    } finally {
+      Reflect.deleteProperty(store, slot)
+    }
+  })
+
+  it('converts a live-path ownership denial into not-found silence', async () => {
+    const { ctx, agents } = await harness()
+    const slot = Symbol.for('dsh.session-controller.callerSubjectReader')
+    const store = globalThis as Record<symbol, unknown>
+    const foreign = agent(ctx, { ...header('live-denied'), owner: 'bob@example.com' })
+    await ctx.agents.register(foreign)
+
+    try {
+      // A foreign subject cannot resolve another subject's live Agent.
+      store[slot] = () => ({ subject: 'alice@example.com' })
+      await expect(agents.resolveAgent(foreign.id)).resolves.toMatchObject({
+        error: { code: 'session/not-found' },
+      })
+
+      // The owning subject resolves the same live Agent.
+      store[slot] = () => ({ subject: 'bob@example.com' })
+      await expect(agents.resolveAgent(foreign.id)).resolves.toEqual({ agent: foreign })
+    } finally {
+      Reflect.deleteProperty(store, slot)
+    }
+  })
+
+  it('propagates an unexpected caller-subject reader failure instead of mapping it', async () => {
+    const { ctx, agents } = await harness()
+    const live = agent(ctx, header('live-reader-failure'))
+    await ctx.agents.register(live)
+    const slot = Symbol.for('dsh.session-controller.callerSubjectReader')
+    const store = globalThis as Record<symbol, unknown>
+    store[slot] = () => { throw new TypeError('reader exploded') }
+    try {
+      await expect(agents.resolveAgent(live.id)).rejects.toBeInstanceOf(TypeError)
+    } finally {
+      Reflect.deleteProperty(store, slot)
+    }
+  })
+
   it('reports not-found and ordinary resume failures without fabricating an Agent', async () => {
     const missing = await harness()
     providePersistence(missing.ctx, {
@@ -317,6 +398,27 @@ describe('ApiSession create or adoption', () => {
 
     await expect(Promise.all([first, second])).resolves.toEqual([created, created])
     expect(create).toHaveBeenCalledOnce()
+  })
+
+  it('stamps the verified dispatch subject as the owner of a created Session', async () => {
+    const { ctx, agents } = await harness()
+    const cwd = mkdtempSync(join(tmpdir(), 'dsh-session-controller-owned-'))
+    tempDirs.push(cwd)
+    const meta = { ...header('owned-create', cwd), owner: 'alice@example.com' }
+    const created = unpublishedAgent(ctx, meta)
+    const create = vi.spyOn(ctx.agents, 'create').mockResolvedValue({
+      agent: created,
+      dispose: () => Promise.resolve(),
+    })
+    const slot = Symbol.for('dsh.session-controller.callerSubjectReader')
+    const store = globalThis as Record<symbol, unknown>
+    store[slot] = () => ({ subject: 'alice@example.com' })
+    try {
+      await expect(agents.ensureSession(meta.id, cwd, false)).resolves.toBe(created)
+    } finally {
+      Reflect.deleteProperty(store, slot)
+    }
+    expect(create.mock.calls[0]?.[0].meta).toMatchObject({ cwd, owner: 'alice@example.com' })
   })
 
   it('accepts a raced ordinary creation and rejects a raced attached child', async () => {

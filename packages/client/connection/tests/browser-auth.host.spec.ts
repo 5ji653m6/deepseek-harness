@@ -73,14 +73,14 @@ function request(url: string, authority = '127.0.0.1:3080', init?: {
   }
 }
 
-function exchange(
+async function exchange(
   auth: BrowserAuth,
   authority = '127.0.0.1:3080',
-): { cookie: string; launchUrl: string; state: ResponseState } {
+): Promise<{ cookie: string; launchUrl: string; state: ResponseState }> {
   const launchUrl = auth.authenticatedUrl(`http://${authority}`)
   const target = new URL(launchUrl)
   const res = response()
-  expect(auth.authorizeIndex(request(`${target.pathname}${target.search}`, authority), res.value)).toBe(false)
+  expect(await auth.authorizeIndex(request(`${target.pathname}${target.search}`, authority), res.value)).toBe(false)
   const setCookie = res.state.headers?.['set-cookie']
   if (setCookie === undefined) throw new Error('token exchange did not set a cookie')
   return { cookie: setCookie.split(';', 1)[0]!, launchUrl, state: res.state }
@@ -95,7 +95,7 @@ describe('BrowserAuth', () => {
     const store = new RecordCredentials()
     const processOwner = {}
     const first = await createAuth(store, 30, processOwner)
-    const login = exchange(first)
+    const login = await exchange(first)
 
     expect(login.state).toMatchObject({
       status: 303,
@@ -125,7 +125,7 @@ describe('BrowserAuth', () => {
     expect(restarted.isAuthenticated(request('/', '127.0.0.1:3080', { cookie: login.cookie }))).toBe(true)
     const staleUrl = new URL(login.launchUrl)
     const redirected = response()
-    expect(restarted.authorizeIndex(request(
+    expect(await restarted.authorizeIndex(request(
       `${staleUrl.pathname}${staleUrl.search}`,
       '127.0.0.1:3080',
       { cookie: login.cookie },
@@ -142,9 +142,9 @@ describe('BrowserAuth', () => {
 
   it('accepts the cookie for index serving and gives every unauthenticated request one response', async () => {
     const auth = await createAuth(new RecordCredentials())
-    const { cookie } = exchange(auth)
+    const { cookie } = await exchange(auth)
     const allowed = response()
-    expect(auth.authorizeIndex(request('/index.html', '127.0.0.1:3080', { cookie }), allowed.value)).toBe(true)
+    expect(await auth.authorizeIndex(request('/index.html', '127.0.0.1:3080', { cookie }), allowed.value)).toBe(true)
     expect(allowed.state).toEqual({})
 
     for (const candidate of [
@@ -155,7 +155,7 @@ describe('BrowserAuth', () => {
       request(auth.authenticatedUrl('http://127.0.0.1:3080'), '127.0.0.1:3080', { method: 'HEAD' }),
     ]) {
       const denied = response()
-      expect(auth.authorizeIndex(candidate, denied.value)).toBe(false)
+      expect(await auth.authorizeIndex(candidate, denied.value)).toBe(false)
       expect(denied.state.status).toBe(401)
       expect(denied.state.headers).toEqual({
         'cache-control': 'no-store',
@@ -172,7 +172,7 @@ describe('BrowserAuth', () => {
     vi.setSystemTime(new Date('2026-08-24T00:00:00.000Z'))
     const store = new RecordCredentials()
     const auth = await createAuth(store)
-    const { cookie } = exchange(auth)
+    const { cookie } = await exchange(auth)
     const [name, value] = cookie.split('=') as [string, string]
 
     expect(auth.isAuthenticated(request('/', '127.0.0.1:3080', { cookie: `${name}=broken` }))).toBe(false)
@@ -210,17 +210,17 @@ describe('BrowserAuth', () => {
   it('loads one secret per activation and replaces it after deletion on the next activation', async () => {
     const store = new RecordCredentials()
     const auth = await createAuth(store)
-    const first = exchange(auth)
+    const first = await exchange(auth)
     expect(store).toMatchObject({ reads: 0, modifies: 1 })
 
     await store.deleteRecord()
     expect(auth.isAuthenticated(request('/', '127.0.0.1:3080', { cookie: first.cookie }))).toBe(true)
-    const sameActivation = exchange(auth)
+    const sameActivation = await exchange(auth)
     expect(auth.isAuthenticated(request('/', '127.0.0.1:3080', { cookie: sameActivation.cookie }))).toBe(true)
     expect(store).toMatchObject({ reads: 0, modifies: 1 })
 
     const reactivated = await createAuth(store)
-    const second = exchange(reactivated)
+    const second = await exchange(reactivated)
     expect(second.cookie).not.toBe(first.cookie)
     expect(reactivated.isAuthenticated(request('/', '127.0.0.1:3080', { cookie: first.cookie }))).toBe(false)
     expect(reactivated.isAuthenticated(request('/', '127.0.0.1:3080', { cookie: second.cookie }))).toBe(true)

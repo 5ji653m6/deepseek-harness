@@ -10,6 +10,7 @@ import type {} from '@deepseek-ai/dsh-session-projection-cache'
 import { SessionQueryError, type SessionSearchCursor } from '@deepseek-ai/dsh-session-query'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import { z } from 'zod'
+import { currentCallerDispatch } from './caller-subject.ts'
 import {
   SESSION_SEARCH_RESULT_LIMIT,
   SESSION_SEARCH_SNIPPET_MAX_CODE_POINTS,
@@ -120,16 +121,21 @@ export class ApiSessionList {
 
   /**
    * Read every visible attached and persisted Session without activating an Agent.
+   * A browser dispatch sees only Sessions it owns (its verified subject, or
+   * ownerless Sessions on the process-token path); internal Host work lists
+   * the full corpus.
    * @param signal - optional cancellation for persistence reads.
    * @returns visible Session summaries ordered by activity.
    */
   async list(signal?: AbortSignal): Promise<SessionSummary[]> {
     signal?.throwIfAborted()
+    const dispatch = currentCallerDispatch()
     const records = await this.ctx.sessionQuery.listSessions(signal)
     signal?.throwIfAborted()
     const items: SessionSummary[] = []
     const cold: SessionHeader[] = []
     for (const record of records) {
+      if (dispatch !== undefined && (record.header.owner ?? undefined) !== dispatch.subject) continue
       const live = this.ctx.sessions.get(record.header.id)
       if (live !== undefined) {
         items.push(this.summaryFor(live))
@@ -177,8 +183,12 @@ export class ApiSessionList {
     try {
       const visible = await provider.listSessions(signal)
       signal.throwIfAborted()
+      // Search never widens the corpus: the same ownership filter as list()
+      // applies before any content is read.
+      const dispatch = currentCallerDispatch()
       const visibleIds = new Set(visible
-        .filter(record => record.header.cwd !== undefined)
+        .filter(record => record.header.cwd !== undefined
+          && (dispatch === undefined || (record.header.owner ?? undefined) === dispatch.subject))
         .map(record => record.header.id))
       if (visibleIds.size === 0) return { items: [], hasMore: false }
       const authorized: SessionSearchItem[] = []

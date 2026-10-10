@@ -3,6 +3,7 @@ import { HostConnectionService } from '@deepseek-ai/dsh-client-connection'
 import type { BrowserAuth } from '@deepseek-ai/dsh-client-connection/src/browser-auth.ts'
 import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 import type { SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
+import { SessionPersistenceNotFoundError } from '@deepseek-ai/dsh-session-persistence'
 import type { SessionHandle } from '@deepseek-ai/dsh-session-persistence'
 import { strFromU8, unzipSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
@@ -43,6 +44,13 @@ async function mounted(withServices: boolean): Promise<{
   if (withServices) {
     ctx.provide('sessionQuery', {
       traceSession: async () => ({ descendants: [] }),
+      observeSession: async (id: SessionId) => ({
+        header: readHandle(String(id)).header,
+        inheritedEventCount: 0,
+        events: [],
+        projections: undefined,
+        [Symbol.dispose]: () => {},
+      }),
     } as never)
     ctx.provide('sessionPersistence', {
       stat: async (id: SessionId) => ({ header: readHandle(String(id)).header }),
@@ -103,5 +111,129 @@ describe('Session log export Fetch route', () => {
     for (const compressionLevel of [-1, 10, 1.5]) {
       expect(() => Config({ compressionLevel } as never)).toThrow()
     }
+  })
+
+  it('exports owned Sessions for their subject and hides foreign ones', async () => {
+    const SLOT = Symbol.for('dsh.session-controller.callerSubjectReader')
+    const store = globalThis as Record<symbol, unknown>
+    const ownedHeader = { ...readHandle('session-1').header, owner: 'alice@example.com' }
+    const ctx = new Context()
+    ctx.provide('commands', { register: () => () => {} } as never)
+    ctx.provide('sessionQuery', {
+      traceSession: async () => ({ descendants: [] }),
+      observeSession: async () => ({
+        header: ownedHeader,
+        inheritedEventCount: 0,
+        events: [],
+        projections: undefined,
+        [Symbol.dispose]: () => {},
+      }),
+    } as never)
+    ctx.provide('sessionPersistence', {
+      stat: async () => ({ header: ownedHeader }),
+      open: async () => readHandle('session-1'),
+    } as never)
+    ctx.provide('attachments', {
+      readImage: async () => { throw new Error('fixture has no images') },
+    } as never)
+    const connection = new HostConnectionService(ctx, [], {} as BrowserAuth)
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await fiber
+    const shared = connection.createSharedFetchHandler('/api')
+    const url = `http://host${SESSION_LOG_EXPORT_PATH}?sessionId=session-1`
+
+    try {
+      // Internal work (no browser dispatch) keeps full access.
+      Reflect.deleteProperty(store, SLOT)
+      expect((await shared.fetch(new Request(url))).status).toBe(200)
+
+      // The owning subject exports; another subject reads 404 silence.
+      store[SLOT] = () => ({ subject: 'alice@example.com' })
+      expect((await shared.fetch(new Request(url))).status).toBe(200)
+      store[SLOT] = () => ({ subject: 'bob@example.com' })
+      expect((await shared.fetch(new Request(url))).status).toBe(404)
+      store[SLOT] = () => ({ subject: undefined })
+      expect((await shared.fetch(new Request(url))).status).toBe(404)
+    } finally {
+      Reflect.deleteProperty(store, SLOT)
+      await fiber.dispose()
+    }
+  })
+
+  it('hides ownerless Sessions from a browser dispatch', async () => {
+    const SLOT = Symbol.for('dsh.session-controller.callerSubjectReader')
+    const store = globalThis as Record<symbol, unknown>
+    const { connection, dispose } = await mounted(true)
+    const shared = connection.createSharedFetchHandler('/api')
+
+    try {
+      store[SLOT] = () => ({ subject: 'alice@example.com' })
+      expect((await shared.fetch(new Request(
+        `http://host${SESSION_LOG_EXPORT_PATH}?sessionId=session-1`,
+      ))).status).toBe(404)
+    } finally {
+      Reflect.deleteProperty(store, SLOT)
+      await dispose()
+    }
+  })
+
+  it('answers 500 without echoing internals when observing the Session fails', async () => {
+    const ctx = new Context()
+    ctx.provide('commands', { register: () => () => {} } as never)
+    ctx.provide('sessionQuery', {
+      traceSession: async () => ({ descendants: [] }),
+      observeSession: async () => { throw new Error('/host/private/index corrupt') },
+    } as never)
+    ctx.provide('sessionPersistence', {
+      stat: async (id: SessionId) => ({ header: readHandle(String(id)).header }),
+      open: async (id: SessionId) => readHandle(String(id)),
+    } as never)
+    ctx.provide('attachments', {
+      readImage: async () => { throw new Error('fixture has no images') },
+    } as never)
+    const connection = new HostConnectionService(ctx, [], {} as BrowserAuth)
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await fiber
+    const shared = connection.createSharedFetchHandler('/api')
+
+    const response = await shared.fetch(new Request(
+      `http://host${SESSION_LOG_EXPORT_PATH}?sessionId=session-1`,
+    ))
+    expect(response.status).toBe(500)
+    expect(await response.text()).toBe('session log export failed to read the stored log')
+    await fiber.dispose()
+  })
+
+  it('answers 404 when the observed Session has no durable log', async () => {
+    const ctx = new Context()
+    ctx.provide('commands', { register: () => () => {} } as never)
+    ctx.provide('sessionQuery', {
+      traceSession: async () => ({ descendants: [] }),
+      observeSession: async (id: SessionId) => ({
+        header: readHandle(String(id)).header,
+        inheritedEventCount: 0,
+        events: [],
+        projections: undefined,
+        [Symbol.dispose]: () => {},
+      }),
+    } as never)
+    ctx.provide('sessionPersistence', {
+      stat: async () => undefined,
+      open: async (id: SessionId) => { throw new SessionPersistenceNotFoundError(id) },
+    } as never)
+    ctx.provide('attachments', {
+      readImage: async () => { throw new Error('fixture has no images') },
+    } as never)
+    const connection = new HostConnectionService(ctx, [], {} as BrowserAuth)
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await fiber
+    const shared = connection.createSharedFetchHandler('/api')
+
+    const response = await shared.fetch(new Request(
+      `http://host${SESSION_LOG_EXPORT_PATH}?sessionId=session-1`,
+    ))
+    expect(response.status).toBe(404)
+    expect(await response.text()).toBe('session not found')
+    await fiber.dispose()
   })
 })

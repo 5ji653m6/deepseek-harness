@@ -1437,6 +1437,21 @@ describe('SessionStore', () => {
     })
   })
 
+  it('attaches the authenticated subject as the header owner', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    const session = ctx.sessions.create(SessionId('owned'), {
+      meta: { owner: 'alice@example.com' },
+    })
+    expect(session.header).toMatchObject({
+      id: 'owned',
+      owner: 'alice@example.com',
+      isSeeded: false,
+    })
+    // The process-token path keeps the header ownerless.
+    expect(ctx.sessions.create(SessionId('ownerless')).header).not.toHaveProperty('owner')
+  })
+
   it('rejects non-JSON and invalid scalar session metadata', async () => {
     const ctx = new Context()
     await ctx.plugin(SessionStore)
@@ -1454,6 +1469,7 @@ describe('SessionStore', () => {
       { meta: { delegationDepth: 0.5 }, error: /delegationDepth must be a non-negative safe integer/ },
       { meta: { delegationDepth: -1 }, error: /delegationDepth must be a non-negative safe integer/ },
       { meta: { agentPreset: 1 }, error: /agentPreset must be a string/ },
+      { meta: { owner: 1 }, error: /header owner must be a string/ },
     ]
 
     for (const [index, { meta, error }] of cases.entries()) {

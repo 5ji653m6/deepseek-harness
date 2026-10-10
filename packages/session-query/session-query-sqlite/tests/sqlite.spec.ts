@@ -547,6 +547,35 @@ describe('SQLite session search', () => {
     await persistence.dispose()
   })
 
+  it('round-trips the header owner through live and persisted rows', async () => {
+    const persisted = header('owned-persisted', 5, { owner: 'bob@example.com' })
+    TestPersistence.reset([{ meta: persisted, events: messageEvents('durable needle') }])
+    const ctx = await liveContext()
+    const persistence = await ctx.plugin(TestPersistence)
+    ctx.sessions.create(SessionId('owned-live'), {
+      seed: messageEvents('live needle'),
+      meta: { owner: 'alice@example.com' },
+    })
+
+    await expect(ctx.sessionQuery.searchSessions({
+      query: 'needle',
+      sessionFilters: [{ kind: 'owner', values: ['alice@example.com'] }],
+    })).resolves.toMatchObject({
+      items: [{ header: { id: SessionId('owned-live'), owner: 'alice@example.com' }, live: true }],
+    })
+    await expect(ctx.sessionQuery.searchSessions({
+      query: 'needle',
+      sessionFilters: [{ kind: 'owner', values: ['bob@example.com'] }],
+    })).resolves.toMatchObject({
+      items: [{ header: { id: persisted.id, owner: 'bob@example.com' }, persisted: true }],
+    })
+    await expect(ctx.sessionQuery.searchSessions({
+      query: 'needle',
+      sessionFilters: [{ kind: 'owner', values: [null] }],
+    })).resolves.toEqual({ items: [] })
+    await persistence.dispose()
+  })
+
   it('positions snippets from FTS5 matches across diacritics and punctuation', async () => {
     const ctx = await liveContext({ path: ':memory:', snippetChars: 14 })
     const session = ctx.sessions.create(SessionId('snippet'), {

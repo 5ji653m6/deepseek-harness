@@ -15,6 +15,8 @@ import { SessionQueryError, type SessionObservation } from '@deepseek-ai/dsh-ses
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-typert-registry'
 import type { ModelSelection } from './types.ts'
+import { currentCallerSubject } from './caller-subject.ts'
+import { assertSessionAddressable } from './ownership.ts'
 
 /** Cold Session identity absent from persistence. */
 export class ApiSessionNotFound extends Error {}
@@ -185,7 +187,16 @@ export class ApiSessionAgentController {
     observation?: SessionObservation,
   ): Promise<ApiSessionAgentResult> {
     const live = this.liveAgent(sessionId)
-    if (live !== undefined) return live
+    if (live !== undefined) {
+      if ('agent' in live) {
+        // The live fast path runs outside the resume try/catch below, so an
+        // ownership denial converts here instead of leaking a raw
+        // ApiSessionNotFound as a gateway/internal failure.
+        const denial = this.ownershipDenial(sessionId, live.agent)
+        if (denial !== undefined) return { error: denial }
+      }
+      return live
+    }
     const attached = this.ctx.sessions.get(sessionId)
     if (attached !== undefined && hasApiSessionSubagentOwner(this.ctx, attached, undefined)) {
       return { error: apiSessionSubagentOwnershipError(sessionId) }
@@ -206,7 +217,15 @@ export class ApiSessionAgentController {
         return { error: apiSessionSubagentOwnershipError(error.sessionId) }
       }
       const raced = this.liveAgent(sessionId)
-      if (raced !== undefined) return raced
+      if (raced !== undefined) {
+        if ('agent' in raced) {
+          // Inside the catch handler a raw denial would bypass the
+          // ApiSessionNotFound conversion above; return the stable failure.
+          const denial = this.ownershipDenial(sessionId, raced.agent)
+          if (denial !== undefined) return { error: denial }
+        }
+        return raced
+      }
       const racedSession = this.ctx.sessions.get(sessionId)
       if (racedSession !== undefined && hasApiSessionSubagentOwner(this.ctx, racedSession, undefined)) {
         return { error: apiSessionSubagentOwnershipError(sessionId) }
@@ -218,6 +237,26 @@ export class ApiSessionAgentController {
           {},
         ),
       }
+    }
+  }
+
+  /**
+   * Enforce ownership on one live Agent, converting the not-found silence
+   * into the stable Session-domain failure this API returns.
+   * @param sessionId - identity being resolved.
+   * @param agent - live Agent whose Session header is checked.
+   * @returns the stable not-found failure, or undefined when the Session is
+   *   addressable by the active dispatch.
+   */
+  private ownershipDenial(sessionId: SessionId, agent: Agent): ApiSessionAgentError | undefined {
+    try {
+      assertSessionAddressable(agent.session.header)
+      return undefined
+    } catch (error: unknown) {
+      if (error instanceof ApiSessionNotFound) {
+        return new RemoteError('session/not-found', error.message, { sessionId })
+      }
+      throw error
     }
   }
 
@@ -241,6 +280,10 @@ export class ApiSessionAgentController {
         .catch((error: unknown) => {
           const live = this.ctx.agents.get(sessionId)
           if (live !== undefined) {
+            // The raced Agent was published by another dispatch's creation:
+            // it addresses only when it belongs to this caller, with the same
+            // not-found silence as every other ownership rejection.
+            assertSessionAddressable(live.session.header)
             if (hasApiSessionSubagentOwner(this.ctx, live.session, live)) {
               throw new ApiSessionSubagentOwnership(sessionId)
             }
@@ -418,6 +461,7 @@ export class ApiSessionAgentController {
     if (observation.header.id !== sessionId || observation.header.cwd === undefined) {
       throw new ApiSessionNotFound(`session "${sessionId}" not found`)
     }
+    assertSessionAddressable(observation.header)
     if (hasApiSessionSubagentOwner(this.ctx, { header: observation.header }, undefined)) {
       throw new ApiSessionSubagentOwnership(sessionId)
     }
@@ -445,11 +489,15 @@ export class ApiSessionAgentController {
     if (attached !== undefined && hasApiSessionSubagentOwner(this.ctx, attached, live)) {
       throw new ApiSessionSubagentOwnership(sessionId)
     }
-    if (live !== undefined) return live
+    if (live !== undefined) {
+      assertSessionAddressable(live.session.header)
+      return live
+    }
 
     if (checkPersistedIdentity) {
       try {
         using observation = await this.ctx.sessionQuery.observeSession(sessionId)
+        assertSessionAddressable(observation.header)
         if (hasApiSessionSubagentOwner(this.ctx, { header: observation.header }, undefined)) {
           throw new ApiSessionSubagentOwnership(sessionId)
         }
@@ -476,12 +524,17 @@ export class ApiSessionAgentController {
       throw new Error(`failed to ensure project directory "${cwd}": ${String(error)}`, { cause: error })
     }
     const composition = await this.composeAgent(presetId)
+    // Stamp the verified browser subject into the new header: owned Sessions
+    // belong to the dispatch that created them; internal creations (no
+    // browser dispatch on this chain) stay ownerless.
+    const owner = currentCallerSubject()
     return (await this.ctx.agents.create({
       sessionId,
       agentOptions: this.agentOptions(),
       meta: {
         cwd,
         ...(composition.agentPreset === undefined ? {} : { agentPreset: composition.agentPreset }),
+        ...(owner === undefined ? {} : { owner }),
       },
       setup: composition.setup,
     })).agent

@@ -36,7 +36,19 @@ kind: "package-reference"
 
 cookie 签名密钥是 `ctx.credentials` 中由 `client-connection/browser-session` 拥有的 grant 记录。本地提供方把它持久化到 `$DSH_HOME/.credentials.yaml`；`BrowserAuth` 在 Connection 激活期间加载或创建该记录，并把密钥留在内存中，因此请求认证同步执行。删除或替换该记录会在下一次 Connection 激活时生效。cookie 携带绝对签发与过期区间，`cookieMaxAgeDays` 默认设为 30 天，并在确定性名称与签名 payload 中同时绑定规范化 hostname 和 port。它是 host-only、`Path=/`、`HttpOnly`、`SameSite=Strict`；随附服务器使用 loopback HTTP，因此刻意不设置 `Secure`。
 
-认证之前，每个请求仍经过 `src/api-request-trust.ts`。其 `Host` 必须是 loopback，或与 `trustedHosts` 条目匹配：带端口的 `host:port` 精确匹配，不带端口的条目匹配任意端口，两侧均经 WHATWG 归一化。若附带 `Origin`，它必须等于该 Host；`sec-fetch-site: cross-site` 一律拒绝。畸形配置 authority 会让插件加载失败。这些检查防御 DNS rebinding 与跨站浏览器请求，绝不建立身份。Host/Origin 校验失败返回 403；Host 可信但未认证的请求返回 401。`dsh web --host 0.0.0.0` 仍不受支持。决策记录：[浏览器请求信任](../../../.agents/notes/implemented/architecture/2026-07-28-api-browser-trust-boundary.zh.md)与[浏览器令牌认证](../../../.agents/notes/implemented/architecture/2026-08-24-browser-token-authentication.zh.md)。
+每用户部署将 `hrmsBaseUrl` 设为 HRMS 源站，并在 `/api` 门禁旁挂载 `POST /api/hrms/login` 与 `POST /api/hrms/logout`。登录在签发身份前对照 Frappe 的 `get_logged_user` 验证所出示的邮箱加 `api_key:api_secret` 密钥对：返回的登录用户必须与所出示邮箱大小写不敏感地相等，所有失败类别返回相同的纯文本 401，验证后的密钥对保存在与主体绑定的进程生命周期服务端保险库中——绝不进入 cookie、响应体或日志。成功后签发的 cookie 在签名 payload 中携带已验证主体；进程 token 交换继续签发无主体 cookie，因此单操作者行为不变。登出丢弃所持有的密钥对并清除 cookie。该插件还提供 `hrmsRequestHeaders` 服务：MCP 客户端在每次发出请求时咨询它，从属主会话的主体及其持有的密钥对解析 `X-HRMS-User` 与 `X-HRMS-User-Token`，因此共享同一连接的多个属主在每次请求时只出示各自的标头。Connection 通过进程级读取器发布活跃的 dispatch 主体，并提供一个配套的 runner，使 session-controller 能在属主会话属主主体的 dispatch 下驱动 agent loop——会话归属过滤、每请求 MCP header 解析与 agent-loop 包裹因此无需引用本包即可读取 dispatch。
+
+**用于 Frappe 桌面集成的 iframe 嵌入。** 跨源 iframe 嵌入（例如 `/desk/hr-brain` 的 Frappe 桌面页面）需要配置 `iframeTrustedOrigins`。每个条目是完整的源站 URL（协议加主机，如 `http://frappe.example.com`）。配置后，信任栅栏接受来自这些源站的跨站请求，自动登录流程接受来自嵌入上下文的 Frappe token。Frappe 桌面页面以 `?frappe_token=<api_key:api_secret>&frappe_email=<email>` URL 参数嵌入 GUI。GUI 对照 Frappe 验证该 token，将其存入服务端保险库，并为跨站 iframe 上下文签发携带主体的 cookie（`SameSite=None; Secure`）。后续所有 API 调用使用该 cookie 完成每用户授权。跨站 iframe cookie **要求 HTTPS**（`SameSite=None` 强制 `Secure` 标志）。配置示例：
+
+```yaml
+client-connection:
+  hrmsBaseUrl: "http://frappe.example.com"
+  iframeTrustedOrigins:
+    - "http://frappe.example.com"
+    - "https://frappe.example.com"
+```
+
+认证之前，每个请求仍经过 `src/api-request-trust.ts`。其 `Host` 必须是 loopback，或与 `trustedHosts` 条目匹配：带端口的 `host:port` 精确匹配，不带端口的条目匹配任意端口，两侧均经 WHATWG 归一化。若附带 `Origin`，它必须等于该 Host 或匹配某个 `iframeTrustedOrigins` 条目；除非源站可信，`sec-fetch-site: cross-site` 一律拒绝。畸形配置 authority 会让插件加载失败。这些检查防御 DNS rebinding 与跨站浏览器请求，绝不建立身份。Host/Origin 校验失败返回 403；Host 可信但未认证的请求返回 401。`dsh web --host 0.0.0.0` 仍不受支持。决策记录：[浏览器请求信任](../../../.agents/notes/implemented/architecture/2026-07-28-api-browser-trust-boundary.zh.md)与[浏览器令牌认证](../../../.agents/notes/implemented/architecture/2026-08-24-browser-token-authentication.zh.md)。
 
 <a id="connection-generation"></a>
 ## Connection generation
@@ -65,7 +77,7 @@ API Gateway Client 把内部 `$events` 逻辑流注册为唯一 generation sourc
 
 - **缓冲型 `/api` 路由会把每个请求体保留在内存里**：`maxRequestBodyBytes`（默认 300 MiB，按默认 200 MiB 图片总量上限经 base64 膨胀加信封余量得出）限制普通图片与 RPC 信封。显式启用的流式路由接收带背压的分块并绕过总量上限；路由实现负责持久化、取消与存储配额。
 - **浏览器 cookie 不带 `Secure`**：当前随产品提供的传输方式是 loopback HTTP；若部署经明文网络暴露同一 authority，bearer cookie 可能在传输中泄露。
-- **没有 logout 操作**：清除浏览器 cookie 会结束单个浏览器会话；删除 owner 凭据记录并重启 `dsh` 会撤销全部会话。
+- **没有配置 `hrmsBaseUrl` 时没有 logout 操作**：清除浏览器 cookie 会结束单个浏览器会话；删除 owner 凭据记录并重启 `dsh` 会撤销全部会话。每用户部署改而挂载 HRMS 登出路由。
 
 
 <a id="dev-note"></a>

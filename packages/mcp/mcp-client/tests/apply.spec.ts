@@ -49,6 +49,9 @@ vi.mock('@modelcontextprotocol/client/stdio', () => ({
 // vi.mock is hoisted above static imports, so the module under test sees the
 // mocked SDK even through a static import.
 import { apply, name, inject, Config as ConfigSchema } from '@deepseek-ai/dsh-mcp-client/src/index.ts'
+// The mocked SDK's transport constructor: captured here to inspect the
+// options the plugin's real transport factory passes.
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 
 // ---- Helpers ----
 
@@ -442,6 +445,128 @@ describe('apply (plugin lifecycle)', () => {
 
     expect(mockConnect).toHaveBeenCalled()
     expect(ctx.tools.get('mcp__web__remote')).toBeDefined()
+  })
+
+  it('wires the HRMS header source into per-request resolution when the service is present', async () => {
+    const resolveFor = vi.fn((subject: string | undefined) => subject === undefined
+      ? {}
+      : { 'X-HRMS-User': subject })
+    ctx.provide('hrmsRequestHeaders', { resolveFor } as never)
+    const httpConfig: Config = {
+      transport: 'streamable-http',
+      serverName: 'web',
+      url: 'http://localhost:3000/mcp',
+      headers: {},
+      toolCallTimeoutMs: 30_000,
+      failOnStartupError: false,
+    }
+
+    await apply(ctx, httpConfig)
+
+    const constructed = (StreamableHTTPClientTransport as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as {
+      fetch?: (url: string | URL, init?: RequestInit) => Promise<Response>
+    }
+    expect(constructed.fetch).toBeTypeOf('function')
+    const delegated = vi.fn((_url: string | URL, _init?: RequestInit): Promise<Response> =>
+      Promise.resolve(new Response(null, { status: 200 })))
+    vi.stubGlobal('fetch', delegated)
+    try {
+      await constructed.fetch!('http://localhost:3000/mcp', undefined)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(resolveFor).toHaveBeenCalledWith(undefined)
+    await ctx.fiber.dispose()
+  })
+
+  it('consults the HRMS header source per request, picking up a source provided only after apply', async () => {
+    // Live-profile ordering: hrms-mcp applies BEFORE client-connection
+    // finishes activation, so the service exists only after this plugin's
+    // apply; the wiring must look it up when each request is issued.
+    const httpConfig: Config = {
+      transport: 'streamable-http',
+      serverName: 'web',
+      url: 'http://localhost:3000/mcp',
+      headers: {},
+      toolCallTimeoutMs: 30_000,
+      failOnStartupError: false,
+    }
+    await apply(ctx, httpConfig)
+
+    const constructed = (StreamableHTTPClientTransport as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as {
+      fetch?: (url: string | URL, init?: RequestInit) => Promise<Response>
+    }
+    expect(constructed.fetch).toBeTypeOf('function')
+
+    const resolveFor = vi.fn((subject: string | undefined) => subject === undefined
+      ? {}
+      : { 'X-HRMS-User': subject })
+    ctx.provide('hrmsRequestHeaders', { resolveFor } as never)
+
+    const delegated = vi.fn((_url: string | URL, _init?: RequestInit): Promise<Response> =>
+      Promise.resolve(new Response(null, { status: 200 })))
+    vi.stubGlobal('fetch', delegated)
+    try {
+      await constructed.fetch!('http://localhost:3000/mcp', { headers: { 'x-static': 'value' } })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(resolveFor).toHaveBeenCalledWith(undefined)
+    expect(delegated.mock.calls[0]?.[1]?.headers).toEqual({ 'x-static': 'value' })
+    await ctx.fiber.dispose()
+  })
+
+  it('keeps static headers when no HRMS header source is ever provided (single-operator mode)', async () => {
+    const httpConfig: Config = {
+      transport: 'streamable-http',
+      serverName: 'web',
+      url: 'http://localhost:3000/mcp',
+      headers: { Authorization: 'Bearer x' },
+      toolCallTimeoutMs: 30_000,
+      failOnStartupError: false,
+    }
+    await apply(ctx, httpConfig)
+
+    const constructed = (StreamableHTTPClientTransport as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as {
+      fetch?: (url: string | URL, init?: RequestInit) => Promise<Response>
+    }
+    const delegated = vi.fn((_url: string | URL, _init?: RequestInit): Promise<Response> =>
+      Promise.resolve(new Response(null, { status: 200 })))
+    vi.stubGlobal('fetch', delegated)
+    try {
+      await constructed.fetch!('http://localhost:3000/mcp', { headers: { 'x-static': 'value' } })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(delegated.mock.calls[0]?.[1]?.headers).toEqual({ 'x-static': 'value' })
+    await ctx.fiber.dispose()
+  })
+
+  it('fails loud per request when the provided HRMS header source lacks resolveFor', async () => {
+    const httpConfig: Config = {
+      transport: 'streamable-http',
+      serverName: 'web',
+      url: 'http://localhost:3000/mcp',
+      headers: {},
+      toolCallTimeoutMs: 30_000,
+      failOnStartupError: false,
+    }
+    await apply(ctx, httpConfig)
+
+    const constructed = (StreamableHTTPClientTransport as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as {
+      fetch?: (url: string | URL, init?: RequestInit) => Promise<Response>
+    }
+    ctx.provide('hrmsRequestHeaders', {} as never)
+    vi.stubGlobal('fetch', vi.fn())
+    try {
+      // The resolver is consulted synchronously inside the custom fetch, so
+      // the misconfiguration surfaces as a thrown error on the call itself.
+      expect(() => constructed.fetch!('http://localhost:3000/mcp', undefined))
+        .toThrow(/hrmsRequestHeaders.*resolveFor/)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    await ctx.fiber.dispose()
   })
 })
 

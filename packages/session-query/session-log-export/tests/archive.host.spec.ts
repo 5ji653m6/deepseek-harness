@@ -132,6 +132,32 @@ async function buildApi(
         root: { header: header('session-root'), live: false, persisted: true },
         descendants,
       })),
+      // The export route's per-user rule observes the durable header after the
+      // flush barrier; serve it with the same presence contract as `stat` below.
+      observeSession: async (id: SessionId) => {
+        if (services.open !== undefined || persistence === 'throw') {
+          return {
+            header: header(String(id)),
+            inheritedEventCount: 0,
+            events: [],
+            projections: undefined,
+            [Symbol.dispose]: () => {},
+          }
+        }
+        const stored = logs[id]
+        if (stored === undefined) {
+          const error = new Error('session not found') as Error & { code?: string }
+          error.code = 'SESSION_QUERY_SESSION_NOT_FOUND'
+          throw error
+        }
+        return {
+          header: stored.header,
+          inheritedEventCount: 0,
+          events: [],
+          projections: undefined,
+          [Symbol.dispose]: () => {},
+        }
+      },
     } as never)
   }
   if (persistence) {

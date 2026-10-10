@@ -205,6 +205,54 @@ describe('Remote stream mux server carrier lifecycle', () => {
     await didReturn
   })
 
+  it('runs each logical stream open inside the per-connection dispatch boundary', async () => {
+    const marker = { subject: 'alice@example.com' }
+    let boundary: typeof marker | undefined
+    let observed: typeof marker | 'unset' = 'unset'
+    let opened!: () => void
+    const didOpen = new Promise<void>((resolve) => { opened = resolve })
+    const mux = new RemoteStreamMuxServer(
+      async (_endpoint, _payload, signal) => {
+        observed = boundary ?? 'unset'
+        opened()
+        return waitForAbort(signal)
+      },
+      mapFailure,
+      2_000,
+    )
+    const http = createServer()
+    http.on('upgrade', (request, socket, head) => {
+      mux.handleUpgrade(request, socket, head, (operation) => {
+        boundary = marker
+        try {
+          return operation()
+        } finally {
+          boundary = undefined
+        }
+      })
+    })
+    await new Promise<void>((resolve, reject) => {
+      http.once('error', reject)
+      http.listen(0, '127.0.0.1', () => {
+        http.off('error', reject)
+        resolve()
+      })
+    })
+    try {
+      const address = http.address()
+      if (address === null || typeof address === 'string') throw new Error('fixture HTTP server has no TCP port')
+      const client = await connect(`ws://127.0.0.1:${String(address.port)}`)
+      client.send(openFrame('bounded'))
+      await didOpen
+      expect(observed).toBe(marker)
+      client.close()
+      await once(client, 'close')
+    } finally {
+      await mux.close().catch(() => undefined)
+      await closeHttp(http)
+    }
+  })
+
   it('terminates active sockets on close and reports a repeated close', async () => {
     let opened!: () => void
     const didOpen = new Promise<void>((resolve) => { opened = resolve })

@@ -39,6 +39,8 @@ Session 对象还承载本地提交回显：`session.beginSubmission` 在调用�
 
 分叉复制截至选中已结束轮次的历史，并包含其 `turn/end`。该位置之后的事件均被排除，包括排队输入和模型设置变更。省略锚点或锚点超出日志末尾时，选择最后一个已结束轮次；位于未结束轮次内的锚点会被拒绝。
 
+在每用户部署中（浏览器经 HRMS 登录路由认证），`SessionHeader.owner` 携带创建该 Session 的已验证主体。列表与搜索按 owner 过滤行——主体只能看到自己拥有的 Session，无主体的进程 token 路径只能看到无主体的 Session。恢复、采用（adoption）、历史分页/跟随、分叉与日志导出执行相同的归属检查，对外来 Session 返回与 Session 不存在相同的 not-found 静默。内部 Host 工作（当前没有活跃的浏览器 dispatch）保持完全访问，后台驱动因此不受影响。提示词准入通过 Connection 发布的进程级 caller-subject runner，将每次准入的轮次置于该 Session 属主主体的 dispatch 之下：agent-loop 驱动链在准入内启动，因此每请求 MCP header 解析在每次工具调用时都观察到属主，而无主体 Session 的 loop 不出示任何 `X-HRMS-*` 标头。
+
 <a id="session-media-references"></a>
 ## 会话媒体引用
 

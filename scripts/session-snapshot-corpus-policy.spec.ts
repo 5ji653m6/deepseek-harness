@@ -16,7 +16,7 @@ const adjacent = Array.from({ length: SESSION_FORMAT_VERSION - 1 }, (_, index) =
   selectedVersions: [index + 1],
   retained: { version: index + 1, coverage: ['adjacent-migration'] as const },
 }))
-const current = { key: 'session/current', selectedVersions: Array<number>(8).fill(SESSION_FORMAT_VERSION) }
+const current = { key: 'session/current', selectedVersions: Array<number>(9).fill(SESSION_FORMAT_VERSION) }
 
 describe('recorded-session corpus policy', () => {
   it('accepts a current majority and complete bounded migration coverage', () => {
@@ -30,7 +30,7 @@ describe('recorded-session corpus policy', () => {
       { key: 'session/packed', selectedVersions: [0], retained: { version: 0, coverage: ['packed-row'] } },
       { key: 'session/retry', selectedVersions: [0], retained: { version: 0, coverage: ['retry-failure'] } },
       ...adjacent,
-    ])).toEqual({ currentRoles: 8, retainedRoles: 5 + adjacent.length, retainedScenarios: 3 + adjacent.length })
+    ])).toEqual({ currentRoles: 9, retainedRoles: 5 + adjacent.length, retainedScenarios: 3 + adjacent.length })
   })
 
   it('requires v0 coverage from v0 fixtures', () => {
@@ -79,10 +79,10 @@ describe('recorded-session corpus policy', () => {
 
   it('bounds historical roles and requires a current majority', () => {
     expect(() => assertSnapshotCorpusPolicy([
-      { ...current, selectedVersions: Array<number>(20).fill(SESSION_FORMAT_VERSION) },
-      { ...completeV0, selectedVersions: Array<number>(11).fill(0) },
+      { ...current, selectedVersions: Array<number>(80).fill(SESSION_FORMAT_VERSION) },
+      { ...completeV0, selectedVersions: Array<number>(51).fill(0) },
       ...adjacent,
-    ])).toThrow(`Session corpus retains ${11 + adjacent.length} historical roles; maximum is 10`)
+    ])).toThrow(`Session corpus retains ${51 + adjacent.length} historical roles; maximum is 50`)
     expect(() => assertSnapshotCorpusPolicy([
       { ...current, selectedVersions: [SESSION_FORMAT_VERSION] }, completeV0, ...adjacent,
     ])).toThrow(`Session corpus requires a current majority; current=1, retained=${1 + adjacent.length}`)
